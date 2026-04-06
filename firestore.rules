@@ -1,0 +1,40 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only allow authenticated users to read and write
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if request.auth.uid == userId;
+    }
+
+    match /items/{itemId} {
+      // Create: Authenticated users can create items.
+      allow create: if isAuthenticated() &&
+                    (!request.resource.data.isPrivate || request.resource.data.creatorId == request.auth.uid);
+
+      // Read: Authenticated users can read public items or private items they created.
+      allow read: if isAuthenticated() &&
+                  (!resource.data.isPrivate || resource.data.creatorId == request.auth.uid);
+
+      // Update: Authenticated users can update public items or private items they created.
+      allow update: if isAuthenticated() &&
+                    (!resource.data.isPrivate || resource.data.creatorId == request.auth.uid) &&
+                    (!request.resource.data.isPrivate || request.resource.data.creatorId == request.auth.uid);
+
+      // Delete: Authenticated users can delete public items or private items they created.
+      allow delete: if isAuthenticated() &&
+                    (!resource.data.isPrivate || resource.data.creatorId == request.auth.uid);
+
+      // Allow read/write to nested collections (like prices history)
+      match /prices/{priceId} {
+        allow read, write: if isAuthenticated() &&
+                           (!get(/databases/$(database)/documents/items/$(itemId)).data.isPrivate || get(/databases/$(database)/documents/items/$(itemId)).data.creatorId == request.auth.uid);
+      }
+    }
+  }
+}
