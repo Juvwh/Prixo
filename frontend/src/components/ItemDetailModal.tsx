@@ -96,7 +96,9 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
             {/* Right: Price & Chart */}
             <div className="space-y-8 flex flex-col">
               <div>
-                <p className="text-sm font-medium text-[#6c757d] uppercase tracking-wider mb-2">{item.category}</p>
+                {item.boards && item.boards.length > 0 && (
+                   <p className="text-sm font-medium text-[#6c757d] uppercase tracking-wider mb-2">{item.boards.join(', ')}</p>
+                )}
 
                 {item.scrapeError ? (
                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">

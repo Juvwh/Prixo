@@ -2,6 +2,8 @@ import React from 'react';
 import { ArrowDownRight, ArrowUpRight, Lock, Heart, AlertTriangle } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 import { cn } from '../utils/cn';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface PriceHistory {
   date: string;
@@ -11,7 +13,7 @@ interface PriceHistory {
 interface ItemCardProps {
   id: string;
   name: string;
-  category: string;
+  boards?: string[];
   currentPrice: number;
   imageUrl?: string;
   isPrivate: boolean;
@@ -22,7 +24,28 @@ interface ItemCardProps {
   onClick: () => void;
 }
 
-export function ItemCard({ name, category, currentPrice, imageUrl, isPrivate, isFavorite, history, isScraping, scrapeError, onClick }: ItemCardProps) {
+export function ItemCard({ id, name, boards, currentPrice, imageUrl, isPrivate, isFavorite, history, isScraping, scrapeError, onClick }: ItemCardProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: id,
+    data: {
+      type: 'item',
+      item: { id, name, boards, currentPrice, imageUrl, isPrivate, isFavorite, history, isScraping, scrapeError }
+    }
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
   // Determine if price went down based on last two records
   const priceDropped = history.length > 1 && history[history.length - 1].price < history[history.length - 2].price;
   const priceIncreased = history.length > 1 && history[history.length - 1].price > history[history.length - 2].price;
@@ -34,8 +57,15 @@ export function ItemCard({ name, category, currentPrice, imageUrl, isPrivate, is
 
   return (
     <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
       onClick={onClick}
-      className="group bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer border border-[#dee2e6] break-inside-avoid mb-6"
+      className={cn(
+        "group bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer border border-[#dee2e6] break-inside-avoid mb-6 touch-manipulation",
+        isDragging && "shadow-2xl scale-[1.02] z-50 relative border-[#a8d5ba]"
+      )}
     >
       <div className="relative aspect-[4/3] overflow-hidden bg-[#f8f9fa]">
         <img
@@ -58,7 +88,10 @@ export function ItemCard({ name, category, currentPrice, imageUrl, isPrivate, is
       </div>
 
       <div className="p-5">
-        <p className="text-xs font-medium text-[#6c757d] uppercase tracking-wider mb-1">{category}</p>
+        {/* Placeholder: On affichera potentiellement le premier tableau ici, ou rien */}
+        {boards && boards.length > 0 && (
+           <p className="text-xs font-medium text-[#6c757d] uppercase tracking-wider mb-1 line-clamp-1">{boards.join(', ')}</p>
+        )}
         <h3 className="text-lg font-semibold text-[#212529] leading-tight mb-4 line-clamp-2">{name}</h3>
 
         <div className="flex items-end justify-between">
