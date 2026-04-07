@@ -80,7 +80,7 @@ export function Sidebar({ onAddClick, onAddBoardClick, onLogout, className, boar
           </button>
 
           <div className="pt-6 pb-2 flex items-center justify-between px-4">
-            <p className="text-xs font-semibold text-[#adb5bd] uppercase tracking-wider">Tableaux</p>
+            <p className="text-xs font-semibold text-[#adb5bd] uppercase tracking-wider">Tableaux Partagés</p>
             <button
               onClick={onAddBoardClick}
               className="text-[#6c757d] hover:text-[#212529] transition-colors"
@@ -90,16 +90,39 @@ export function Sidebar({ onAddClick, onAddBoardClick, onLogout, className, boar
             </button>
           </div>
 
-          {boards.map((board) => (
-            <DroppableBoard
-              key={board.id}
-              board={board}
-              selectedBoardId={selectedBoardId}
-              onClick={() => { onSelectBoard(board.id); setIsMobileMenuOpen(false); }}
-            />
-          ))}
+          {boards.filter(b => !b.isPrivate).length === 0 ? (
+            <p className="px-4 text-xs text-[#adb5bd] italic">Aucun tableau partagé</p>
+          ) : (
+            boards.filter(b => !b.isPrivate).map((board) => (
+              <DroppableBoard
+                key={board.id}
+                board={board}
+                selectedBoardId={selectedBoardId}
+                onClick={() => { onSelectBoard(board.id); setIsMobileMenuOpen(false); }}
+              />
+            ))
+          )}
 
-          <div className="pt-4">
+          <div className="pt-6 pb-2 flex items-center justify-between px-4">
+            <p className="text-xs font-semibold text-[#adb5bd] uppercase tracking-wider flex items-center">
+              Tableaux Privés <Lock className="w-3 h-3 ml-1" />
+            </p>
+          </div>
+
+          {boards.filter(b => b.isPrivate).length === 0 ? (
+            <p className="px-4 text-xs text-[#adb5bd] italic">Aucun tableau privé</p>
+          ) : (
+            boards.filter(b => b.isPrivate).map((board) => (
+              <DroppableBoard
+                key={board.id}
+                board={board}
+                selectedBoardId={selectedBoardId}
+                onClick={() => { onSelectBoard(board.id); setIsMobileMenuOpen(false); }}
+              />
+            ))
+          )}
+
+          <div className="pt-6">
             <button
               onClick={onAddClick}
               className="flex items-center w-full px-4 py-3 text-sm font-medium text-white bg-[#212529] rounded-xl hover:bg-black transition-colors"

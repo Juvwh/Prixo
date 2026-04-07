@@ -107,6 +107,7 @@ export function Dashboard() {
   const [boardsData, setBoardsData] = useState<any[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
+  const [showPrivateItems, setShowPrivateItems] = useState(false);
   const { user } = useAuth();
 
   // Fetch Items
@@ -134,6 +135,18 @@ export function Dashboard() {
     });
     return unsubscribe;
   }, [user]);
+
+  // Default showPrivateItems based on board privacy
+  useEffect(() => {
+    if (selectedBoardId && selectedBoardId !== 'favorites') {
+      const boardDoc = boardsData.find(b => b.id === selectedBoardId);
+      if (boardDoc) {
+        setShowPrivateItems(boardDoc.isPrivate);
+      }
+    } else {
+      setShowPrivateItems(false);
+    }
+  }, [selectedBoardId, boardsData]);
 
   // Fetch Boards
   useEffect(() => {
@@ -288,9 +301,18 @@ export function Dashboard() {
 
   // Filter and sort items based on selected board
   let displayedItems = items.filter(item => {
-    if (selectedBoardId === 'favorites') return item.isFavorite;
-    if (selectedBoardId !== null) return item.boards?.includes(selectedBoardId);
-    return true; // null means 'All'
+    let matchesBoard = true;
+    if (selectedBoardId === 'favorites') matchesBoard = item.isFavorite;
+    else if (selectedBoardId !== null) matchesBoard = item.boards?.includes(selectedBoardId);
+
+    if (!matchesBoard) return false;
+
+    // Privacy filter
+    if (item.isPrivate && item.userId === user?.uid && !showPrivateItems) {
+       return false;
+    }
+
+    return true;
   });
 
   // If a specific board is selected, sort items according to the board's itemOrder
@@ -422,6 +444,9 @@ export function Dashboard() {
     return "Tous les articles";
   };
 
+  const totalValue = displayedItems.reduce((sum, item) => sum + (item.currentPrice || 0), 0);
+  const formattedTotal = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(totalValue);
+
   return (
     <DndContext
       sensors={sensors}
@@ -442,8 +467,31 @@ export function Dashboard() {
       <main className="flex-1 md:ml-64 p-4 sm:p-6 lg:p-8 pt-20 md:pt-8 pb-24 md:pb-8">
         <div className="max-w-7xl mx-auto">
           <header className="mb-8">
-            <h2 className="text-3xl font-bold text-[#212529] tracking-tight">{getPageTitle()}</h2>
-            <p className="text-[#6c757d] mt-2">Suivez l'évolution des prix de vos articles favoris.</p>
+            <h2 className="text-3xl font-bold text-[#212529] tracking-tight mb-2">{getPageTitle()}</h2>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="inline-flex items-center px-4 py-2 bg-[#eef2f0] rounded-xl text-[#212529]">
+                <span className="text-sm font-medium mr-2">Valeur cumulée :</span>
+                <span className="text-lg font-bold">{formattedTotal}</span>
+              </div>
+
+              {selectedBoardId && selectedBoardId !== 'favorites' && (
+                <div className="flex items-center">
+                  <span className="text-sm font-medium text-[#6c757d] mr-3">Afficher mes articles privés</span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={showPrivateItems}
+                      onChange={e => setShowPrivateItems(e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#a8d5ba]"></div>
+                  </label>
+                </div>
+              )}
+            </div>
+
+            <p className="text-[#6c757d] mt-4">Suivez l'évolution des prix de vos articles favoris.</p>
           </header>
 
           <SortableContext
