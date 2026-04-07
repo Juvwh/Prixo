@@ -1,23 +1,27 @@
 import React, { useState } from 'react';
 import { Home, PlusSquare, LogOut, Heart, Menu, Lock } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { useDroppable } from '@dnd-kit/core';
 
-export interface CategoryData {
+export interface BoardData {
+  id: string;
   name: string;
-  isAllPrivate: boolean;
+  isPrivate: boolean;
+  ownerId?: string;
 }
 
 interface SidebarProps {
   onAddClick: () => void;
+  onAddBoardClick: () => void;
   onLogout: () => void;
   className?: string;
-  categories: CategoryData[];
-  selectedCategory: string | null;
-  onSelectCategory: (category: string | null) => void;
+  boards: BoardData[];
+  selectedBoardId: string | null;
+  onSelectBoard: (boardId: string | null) => void;
   userEmail?: string | null;
 }
 
-export function Sidebar({ onAddClick, onLogout, className, categories, selectedCategory, onSelectCategory, userEmail }: SidebarProps) {
+export function Sidebar({ onAddClick, onAddBoardClick, onLogout, className, boards, selectedBoardId, onSelectBoard, userEmail }: SidebarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   return (
@@ -50,10 +54,10 @@ export function Sidebar({ onAddClick, onLogout, className, categories, selectedC
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
           <button
-            onClick={() => { onSelectCategory(null); setIsMobileMenuOpen(false); }}
+            onClick={() => { onSelectBoard(null); setIsMobileMenuOpen(false); }}
             className={cn(
               "flex items-center w-full px-4 py-3 text-sm font-medium rounded-xl transition-colors",
-              selectedCategory === null
+              selectedBoardId === null
                 ? "text-[#212529] bg-[#eef2f0]"
                 : "text-[#6c757d] hover:bg-[#eef2f0]/50"
             )}
@@ -63,10 +67,10 @@ export function Sidebar({ onAddClick, onLogout, className, categories, selectedC
           </button>
 
           <button
-            onClick={() => { onSelectCategory('favorites'); setIsMobileMenuOpen(false); }}
+            onClick={() => { onSelectBoard('favorites'); setIsMobileMenuOpen(false); }}
             className={cn(
               "flex items-center w-full px-4 py-3 text-sm font-medium rounded-xl transition-colors",
-              selectedCategory === 'favorites'
+              selectedBoardId === 'favorites'
                 ? "text-[#212529] bg-[#eef2f0]"
                 : "text-[#6c757d] hover:bg-[#eef2f0]/50"
             )}
@@ -75,24 +79,24 @@ export function Sidebar({ onAddClick, onLogout, className, categories, selectedC
             Coups de cœur
           </button>
 
-          <div className="pt-6 pb-2">
-            <p className="px-4 text-xs font-semibold text-[#adb5bd] uppercase tracking-wider">Tableaux</p>
+          <div className="pt-6 pb-2 flex items-center justify-between px-4">
+            <p className="text-xs font-semibold text-[#adb5bd] uppercase tracking-wider">Tableaux</p>
+            <button
+              onClick={onAddBoardClick}
+              className="text-[#6c757d] hover:text-[#212529] transition-colors"
+              title="Créer un tableau"
+            >
+              <PlusSquare className="w-4 h-4" />
+            </button>
           </div>
 
-          {categories.map((cat) => (
-            <button
-              key={cat.name}
-              onClick={() => { onSelectCategory(cat.name); setIsMobileMenuOpen(false); }}
-              className={cn(
-                "flex items-center justify-between w-full px-4 py-2.5 text-sm font-medium rounded-xl transition-colors",
-                selectedCategory === cat.name
-                  ? "text-[#212529] bg-[#eef2f0]"
-                  : "text-[#6c757d] hover:bg-[#eef2f0]/50"
-              )}
-            >
-              <span className="truncate">{cat.name}</span>
-              {cat.isAllPrivate && <Lock className="w-3.5 h-3.5 ml-2 shrink-0 opacity-50" />}
-            </button>
+          {boards.map((board) => (
+            <DroppableBoard
+              key={board.id}
+              board={board}
+              selectedBoardId={selectedBoardId}
+              onClick={() => { onSelectBoard(board.id); setIsMobileMenuOpen(false); }}
+            />
           ))}
 
           <div className="pt-4">
@@ -135,5 +139,33 @@ export function Sidebar({ onAddClick, onLogout, className, categories, selectedC
         </button>
       </div>
     </>
+  );
+}
+
+// Wrapper for Droppable board
+function DroppableBoard({ board, selectedBoardId, onClick }: { board: BoardData, selectedBoardId: string | null, onClick: () => void }) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: board.id,
+    data: {
+      type: 'board',
+      board
+    }
+  });
+
+  return (
+    <button
+      ref={setNodeRef}
+      onClick={onClick}
+      className={cn(
+        "flex items-center justify-between w-full px-4 py-2.5 text-sm font-medium rounded-xl transition-colors",
+        selectedBoardId === board.id
+          ? "text-[#212529] bg-[#eef2f0]"
+          : "text-[#6c757d] hover:bg-[#eef2f0]/50",
+        isOver && "ring-2 ring-[#a8d5ba] bg-[#eef2f0]" // Visual feedback when dragging over
+      )}
+    >
+      <span className="truncate">{board.name}</span>
+      {board.isPrivate && <Lock className="w-3.5 h-3.5 ml-2 shrink-0 opacity-50" />}
+    </button>
   );
 }

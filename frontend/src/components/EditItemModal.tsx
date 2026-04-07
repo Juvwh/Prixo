@@ -9,12 +9,13 @@ interface EditItemModalProps {
   onClose: () => void;
   onSubmit: (id: string, data: any) => void;
   item: any;
+  boards: any[];
 }
 
-export function EditItemModal({ isOpen, onClose, onSubmit, item }: EditItemModalProps) {
+export function EditItemModal({ isOpen, onClose, onSubmit, item, boards }: EditItemModalProps) {
   const [formData, setFormData] = useState({
     name: '',
-    category: '',
+    boards: [] as string[],
     url: '',
     imageUrl: '',
     isPrivate: false,
@@ -25,7 +26,7 @@ export function EditItemModal({ isOpen, onClose, onSubmit, item }: EditItemModal
     if (item) {
       setFormData({
         name: item.name || '',
-        category: item.category || '',
+        boards: item.boards || [],
         url: item.url || '',
         imageUrl: item.imageUrl || '',
         isPrivate: item.isPrivate || false,
@@ -66,15 +67,32 @@ export function EditItemModal({ isOpen, onClose, onSubmit, item }: EditItemModal
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-[#212529] mb-1.5">Catégorie</label>
-            <input
-              required
-              type="text"
-              placeholder="Ex: Salon, Chambre..."
-              className="w-full px-4 py-3 rounded-xl border border-[#dee2e6] bg-[#f8f9fa] focus:bg-white focus:ring-2 focus:ring-[#a8d5ba] focus:border-transparent outline-none transition-all"
-              value={formData.category}
-              onChange={e => setFormData({...formData, category: e.target.value})}
-            />
+            <label className="block text-sm font-medium text-[#212529] mb-1.5">Tableaux</label>
+            <div className="max-h-32 overflow-y-auto p-2 rounded-xl border border-[#dee2e6] bg-[#f8f9fa] space-y-2">
+               {boards.length === 0 ? (
+                 <p className="text-sm text-[#6c757d] p-2">Aucun tableau créé.</p>
+               ) : (
+                 boards.map((board) => (
+                   <label key={board.id} className="flex items-center space-x-3 p-1 cursor-pointer">
+                     <input
+                       type="checkbox"
+                       className="w-4 h-4 text-[#212529] bg-white border-gray-300 rounded focus:ring-[#212529]"
+                       checked={formData.boards.includes(board.id)}
+                       onChange={(e) => {
+                         const checked = e.target.checked;
+                         setFormData(prev => ({
+                           ...prev,
+                           boards: checked
+                             ? [...prev.boards, board.id]
+                             : prev.boards.filter(id => id !== board.id)
+                         }));
+                       }}
+                     />
+                     <span className="text-sm text-[#212529] flex-1 truncate">{board.name}</span>
+                   </label>
+                 ))
+               )}
+            </div>
           </div>
 
           <div>

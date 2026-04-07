@@ -4,11 +4,27 @@ import { ItemCard } from '../components/ItemCard';
 import { AddItemModal } from '../components/AddItemModal';
 import { EditItemModal } from '../components/EditItemModal';
 import { ItemDetailModal } from '../components/ItemDetailModal';
+import { AddBoardModal } from '../components/AddBoardModal';
 import Masonry from 'react-masonry-css';
 import { auth, db, functions } from '../firebase/config';
 import { signOut } from 'firebase/auth';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, orderBy, where, or } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  arrayMove
+} from '@dnd-kit/sortable';
 import { useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 
@@ -84,13 +100,16 @@ const mockItems = [
 
 export function Dashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddBoardModalOpen, setIsAddBoardModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [items, setItems] = useState<any[]>([]);
+  const [boardsData, setBoardsData] = useState<any[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
   const { user } = useAuth();
 
+  // Fetch Items
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -116,8 +135,44 @@ export function Dashboard() {
     return unsubscribe;
   }, [user]);
 
+  // Fetch Boards
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, 'boards'),
+      or(
+        where('isPrivate', '==', false),
+        where('ownerId', '==', user.uid)
+      )
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedBoards = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Sort alphabetically by name
+      fetchedBoards.sort((a, b) => a.name.localeCompare(b.name));
+      setBoardsData(fetchedBoards);
+    });
+    return unsubscribe;
+  }, [user]);
+
   const handleLogout = async () => {
     await signOut(auth);
+  };
+
+  const handleAddBoard = async (data: { name: string, isPrivate: boolean }) => {
+    if (!user) return;
+    try {
+      const docRef = await addDoc(collection(db, 'boards'), {
+        ...data,
+        ownerId: user.uid,
+        itemOrder: [],
+        createdAt: serverTimestamp(),
+      });
+      setSelectedBoardId(docRef.id);
+      showNotification("Tableau créé avec succès.", 'success');
+    } catch (error) {
+      console.error("Error adding board: ", error);
+      showNotification("Erreur lors de la création du tableau.", 'error');
+    }
   };
 
   const handleAddItem = async (data: any) => {
@@ -133,15 +188,32 @@ export function Dashboard() {
         isScraping: true // Indicateur visuel "Recherche en cours"
       });
 
+      // If the item was added to specific boards, we might want to update their itemOrder
+      // In a real robust app, we'd use a batch write, but since itemOrder isn't strictly required
+      // immediately for the item to appear (it just appears at the end), we can handle it via the UI logic later
+      // Actually, since default is at the end, and we render items not in order if order is missing,
+      // it's okay to just leave it. If we wanted, we could append the ID to the board's itemOrder.
+
+      // Let's add it to the boards' itemOrder to be safe
+      if (data.boards && data.boards.length > 0) {
+        data.boards.forEach(async (boardId: string) => {
+          const boardRef = doc(db, 'boards', boardId);
+          const boardDoc = boardsData.find(b => b.id === boardId);
+          if (boardDoc) {
+             const currentOrder = boardDoc.itemOrder || [];
+             // Add to beginning if favorite, else at the end
+             const newOrder = data.isFavorite ? [docRef.id, ...currentOrder] : [...currentOrder, docRef.id];
+             await updateDoc(boardRef, { itemOrder: newOrder });
+          }
+        });
+      }
+
       // Call refresh function immediately here
       try {
         const refreshItemPrice = httpsCallable(functions, 'refreshItemPrice');
         await refreshItemPrice({ itemId: docRef.id });
       } catch (err) {
         console.error("Error refreshing new item: ", err);
-      } finally {
-        // Au cas où la cloud function ne mettrait pas à jour isScraping si elle plante en plein milieu
-        // updateDoc(docRef, { isScraping: false }) serait utile, mais le rafraîchissement peut être géré par l'événement onChange onSnapshot
       }
     } catch (error) {
       console.error("Error adding document: ", error);
@@ -214,32 +286,123 @@ export function Dashboard() {
     }
   };
 
-  // Calculate dynamic categories from items
-  const categoriesMap = new Map<string, { total: number; privateCount: number }>();
-  items.forEach(item => {
-    if (!item.category) return;
-    const cat = item.category.trim();
-    if (!categoriesMap.has(cat)) {
-      categoriesMap.set(cat, { total: 0, privateCount: 0 });
-    }
-    const data = categoriesMap.get(cat)!;
-    data.total += 1;
-    if (item.isPrivate) {
-      data.privateCount += 1;
-    }
-  });
-
-  const categoriesData = Array.from(categoriesMap.entries()).map(([name, data]) => ({
-    name,
-    isAllPrivate: data.total > 0 && data.total === data.privateCount
-  })).sort((a, b) => a.name.localeCompare(b.name));
-
-  // Filter items based on selected category
-  const displayedItems = items.filter(item => {
-    if (selectedCategory === 'favorites') return item.isFavorite;
-    if (selectedCategory !== null) return item.category?.trim() === selectedCategory;
+  // Filter and sort items based on selected board
+  let displayedItems = items.filter(item => {
+    if (selectedBoardId === 'favorites') return item.isFavorite;
+    if (selectedBoardId !== null) return item.boards?.includes(selectedBoardId);
     return true; // null means 'All'
   });
+
+  // If a specific board is selected, sort items according to the board's itemOrder
+  if (selectedBoardId && selectedBoardId !== 'favorites') {
+    const boardDoc = boardsData.find(b => b.id === selectedBoardId);
+    if (boardDoc && boardDoc.itemOrder) {
+      displayedItems.sort((a, b) => {
+        const indexA = boardDoc.itemOrder.indexOf(a.id);
+        const indexB = boardDoc.itemOrder.indexOf(b.id);
+        // If not in order array, push to end
+        const posA = indexA === -1 ? Infinity : indexA;
+        const posB = indexB === -1 ? Infinity : indexB;
+        return posA - posB;
+      });
+    }
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Require dragging at least 8px before activation to distinguish from clicks
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    const activeType = active.data.current?.type;
+    const overType = over.data.current?.type;
+
+    // 1. Drag Item over Sidebar Board
+    if (activeType === 'item' && overType === 'board') {
+       const targetBoardId = overId;
+       const draggedItem = items.find(i => i.id === activeId);
+
+       if (!draggedItem) return;
+
+       const currentBoards = draggedItem.boards || [];
+       const targetBoardDoc = boardsData.find(b => b.id === targetBoardId);
+       if (!targetBoardDoc) return;
+
+       const targetOrder = targetBoardDoc.itemOrder || [];
+
+       if (selectedBoardId && selectedBoardId !== 'favorites') {
+         // Déplacement : On retire de l'actuel, on ajoute au nouveau
+         if (selectedBoardId !== targetBoardId) {
+            const newBoards = currentBoards.filter((b: string) => b !== selectedBoardId);
+            if (!newBoards.includes(targetBoardId)) newBoards.push(targetBoardId);
+
+            await updateDoc(doc(db, 'items', activeId), { boards: newBoards });
+
+            // Mise à jour de l'ordre du nouveau tableau (ajout à la fin)
+            if (!targetOrder.includes(activeId)) {
+               await updateDoc(doc(db, 'boards', targetBoardId), {
+                 itemOrder: [...targetOrder, activeId]
+               });
+            }
+
+            // On pourrait aussi nettoyer itemOrder de l'ancien tableau, mais ce n'est pas strict.
+            showNotification(`Article déplacé vers ${targetBoardDoc.name}`, 'success');
+         }
+       } else {
+         // Ajout simple au nouveau tableau
+         if (!currentBoards.includes(targetBoardId)) {
+            await updateDoc(doc(db, 'items', activeId), {
+               boards: [...currentBoards, targetBoardId]
+            });
+            // Mise à jour de l'ordre du nouveau tableau
+            if (!targetOrder.includes(activeId)) {
+               await updateDoc(doc(db, 'boards', targetBoardId), {
+                 itemOrder: [...targetOrder, activeId]
+               });
+            }
+            showNotification(`Article ajouté à ${targetBoardDoc.name}`, 'success');
+         } else {
+            showNotification(`L'article est déjà dans ${targetBoardDoc.name}`, 'info');
+         }
+       }
+       return;
+    }
+
+    // 2. Reordering Items within a Board
+    if (activeId !== overId && selectedBoardId && selectedBoardId !== 'favorites') {
+      const boardDoc = boardsData.find(b => b.id === selectedBoardId);
+      if (!boardDoc) return;
+
+      const itemsInBoard = displayedItems.map(i => i.id);
+      const oldIndex = itemsInBoard.indexOf(activeId);
+      const newIndex = itemsInBoard.indexOf(overId);
+
+      const newOrder = arrayMove(itemsInBoard, oldIndex, newIndex);
+
+      // Save new order to Firestore
+      try {
+        await updateDoc(doc(db, 'boards', selectedBoardId), {
+          itemOrder: newOrder
+        });
+      } catch (error) {
+        console.error("Error updating board order: ", error);
+        showNotification("Erreur lors de la sauvegarde de l'ordre.", 'error');
+      }
+    }
+  };
 
   const breakpointColumnsObj = {
     default: 4,
@@ -251,19 +414,28 @@ export function Dashboard() {
   };
 
   const getPageTitle = () => {
-    if (selectedCategory === 'favorites') return "Coups de cœur";
-    if (selectedCategory) return selectedCategory;
+    if (selectedBoardId === 'favorites') return "Coups de cœur";
+    if (selectedBoardId) {
+      const board = boardsData.find(b => b.id === selectedBoardId);
+      return board ? board.name : "Tableau inconnu";
+    }
     return "Tous les articles";
   };
 
   return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleDragEnd}
+    >
     <div className="min-h-screen bg-[#f8f9fa] flex">
       <Sidebar
         onAddClick={() => setIsAddModalOpen(true)}
+        onAddBoardClick={() => setIsAddBoardModalOpen(true)}
         onLogout={handleLogout}
-        categories={categoriesData}
-        selectedCategory={selectedCategory}
-        onSelectCategory={setSelectedCategory}
+        boards={boardsData}
+        selectedBoardId={selectedBoardId}
+        onSelectBoard={setSelectedBoardId}
         userEmail={user?.email}
       />
 
@@ -274,25 +446,30 @@ export function Dashboard() {
             <p className="text-[#6c757d] mt-2">Suivez l'évolution des prix de vos articles favoris.</p>
           </header>
 
-          <Masonry
-            breakpointCols={breakpointColumnsObj}
-            className="flex w-auto -ml-6"
-            columnClassName="pl-6 bg-clip-padding"
+          <SortableContext
+             items={displayedItems.map(i => i.id)}
+             strategy={verticalListSortingStrategy}
           >
-            {displayedItems.length === 0 ? (
-              <div className="col-span-full text-center py-20 text-[#6c757d]">
-                Aucun article dans cette catégorie.
-              </div>
-            ) : (
-              displayedItems.map(item => (
-                <ItemCard
-                  key={item.id}
-                  {...item}
-                  onClick={() => setSelectedItem(item)}
-                />
-              ))
-            )}
-          </Masonry>
+            <Masonry
+              breakpointCols={breakpointColumnsObj}
+              className="flex w-auto -ml-6"
+              columnClassName="pl-6 bg-clip-padding"
+            >
+              {displayedItems.length === 0 ? (
+                <div className="col-span-full text-center py-20 text-[#6c757d]">
+                  Aucun article dans ce tableau.
+                </div>
+              ) : (
+                displayedItems.map(item => (
+                  <ItemCard
+                    key={item.id}
+                    {...item}
+                    onClick={() => setSelectedItem(item)}
+                  />
+                ))
+              )}
+            </Masonry>
+          </SortableContext>
         </div>
       </main>
 
@@ -300,12 +477,18 @@ export function Dashboard() {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onSubmit={handleAddItem}
+        boards={boardsData}
+        initialBoardId={selectedBoardId}
       />
 
       <ItemDetailModal
         isOpen={!!selectedItem}
         onClose={() => setSelectedItem(null)}
-        item={selectedItem}
+        item={{
+           ...selectedItem,
+           // Pour l'affichage dans le modal : remplacer les IDs par les noms des tableaux
+           boards: selectedItem?.boards?.map((id: string) => boardsData.find(b => b.id === id)?.name).filter(Boolean)
+        }}
         onRefresh={handleRefreshItem}
         onDelete={handleDeleteItem}
         onEdit={() => setIsEditModalOpen(true)}
@@ -318,7 +501,15 @@ export function Dashboard() {
         onClose={() => setIsEditModalOpen(false)}
         onSubmit={handleEditItem}
         item={selectedItem}
+        boards={boardsData}
+      />
+
+      <AddBoardModal
+        isOpen={isAddBoardModalOpen}
+        onClose={() => setIsAddBoardModalOpen(false)}
+        onSubmit={handleAddBoard}
       />
     </div>
+    </DndContext>
   );
 }
