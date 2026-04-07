@@ -27,6 +27,7 @@ import {
 } from '@dnd-kit/sortable';
 import { useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { Trash2 } from 'lucide-react';
 
 // --- MOCK DATA FOR UI DEVELOPMENT ---
 const mockHistory = [
@@ -277,6 +278,33 @@ export function Dashboard() {
     }
   };
 
+  const handleDeleteBoard = async () => {
+    if (!selectedBoardId || selectedBoardId === 'favorites') return;
+
+    if (window.confirm("Êtes-vous sûr de vouloir supprimer ce tableau ?")) {
+      try {
+        // 1. Delete the board document
+        await deleteDoc(doc(db, 'boards', selectedBoardId));
+
+        // 2. Remove this board from all items that have it
+        // We find all items that include this board in their 'boards' array
+        const itemsToUpdate = items.filter(item => item.boards && item.boards.includes(selectedBoardId));
+
+        for (const item of itemsToUpdate) {
+          const newBoards = item.boards.filter((bId: string) => bId !== selectedBoardId);
+          await updateDoc(doc(db, 'items', item.id), { boards: newBoards });
+        }
+
+        // 3. Reset selection and show notification
+        setSelectedBoardId(null);
+        showNotification("Tableau supprimé avec succès.", 'success');
+      } catch (error) {
+        console.error("Error deleting board: ", error);
+        showNotification("Erreur lors de la suppression du tableau.", 'error');
+      }
+    }
+  };
+
   const handleDeleteItem = async (id: string) => {
     if(window.confirm("Êtes-vous sûr de vouloir supprimer cet article ?")) {
       try {
@@ -467,7 +495,18 @@ export function Dashboard() {
       <main className="flex-1 md:ml-64 p-4 sm:p-6 lg:p-8 pt-20 md:pt-8 pb-24 md:pb-8">
         <div className="max-w-7xl mx-auto">
           <header className="mb-8">
-            <h2 className="text-3xl font-bold text-[#212529] tracking-tight mb-2">{getPageTitle()}</h2>
+            <div className="flex items-center gap-4 mb-2">
+              <h2 className="text-3xl font-bold text-[#212529] tracking-tight">{getPageTitle()}</h2>
+              {selectedBoardId && selectedBoardId !== 'favorites' && (
+                <button
+                  onClick={handleDeleteBoard}
+                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Supprimer le tableau"
+                >
+                  <Trash2 size={20} />
+                </button>
+              )}
+            </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="inline-flex items-center px-4 py-2 bg-[#eef2f0] rounded-xl text-[#212529]">
