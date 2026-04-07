@@ -41,7 +41,7 @@ export function ItemCard({ name, category, currentPrice, imageUrl, isPrivate, is
         <img
           src={imageUrl || defaultImage}
           alt={name}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105"
         />
         <div className="absolute top-4 left-4 flex gap-2">
           {isPrivate && (
