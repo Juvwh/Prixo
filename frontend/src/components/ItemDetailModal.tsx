@@ -44,7 +44,7 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                 <img
                   src={item.imageUrl || "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"}
                   alt={item.name}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                 />
               </div>
 
