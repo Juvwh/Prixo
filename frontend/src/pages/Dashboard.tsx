@@ -257,7 +257,7 @@ export function Dashboard() {
             currentPrice: data.newPrice !== undefined ? data.newPrice : prev.currentPrice,
             lastChecked: new Date().toISOString(),
             isScraping: false,
-            scrapeError: data.newPrice === null ? "Impossible de récupérer le prix sur ce site." : null
+            scrapeError: data.scrapeError || (data.newPrice === null ? "Impossible de récupérer le prix sur ce site." : null)
           };
         }
         return prev;
@@ -514,20 +514,18 @@ export function Dashboard() {
                 <span className="text-lg font-bold">{formattedTotal}</span>
               </div>
 
-              {selectedBoardId && selectedBoardId !== 'favorites' && (
-                <div className="flex items-center">
-                  <span className="text-sm font-medium text-[#6c757d] mr-3">Afficher mes articles privés</span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="sr-only peer"
-                      checked={showPrivateItems}
-                      onChange={e => setShowPrivateItems(e.target.checked)}
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#a8d5ba]"></div>
-                  </label>
-                </div>
-              )}
+              <div className="flex items-center">
+                <span className="text-sm font-medium text-[#6c757d] mr-3">Afficher mes articles privés</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="sr-only peer"
+                    checked={showPrivateItems}
+                    onChange={e => setShowPrivateItems(e.target.checked)}
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#a8d5ba]"></div>
+                </label>
+              </div>
             </div>
 
             <p className="text-[#6c757d] mt-4">Suivez l'évolution des prix de vos articles favoris.</p>
