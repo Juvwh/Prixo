@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, RefreshCw, ExternalLink, Edit2, Trash2, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, RefreshCw, ExternalLink, Edit2, Trash2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis, XAxis, Tooltip, CartesianGrid } from 'recharts';
 import { cn } from '../utils/cn';
 
@@ -11,9 +11,10 @@ interface ItemDetailModalProps {
   onDelete: (id: string) => void;
   onEdit: () => void;
   isRefreshing?: boolean;
+  notification?: { message: string, type: 'success' | 'info' | 'error' } | null;
 }
 
-export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, onEdit, isRefreshing }: ItemDetailModalProps) {
+export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, onEdit, isRefreshing, notification }: ItemDetailModalProps) {
   if (!isOpen || !item) return null;
 
   const formattedPrice = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(item.currentPrice);
@@ -66,6 +67,21 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                   Actualiser
                 </button>
               </div>
+
+              {/* Notification Message */}
+              {notification && (
+                <div className={cn(
+                  "p-3 rounded-xl text-sm font-medium flex items-center animate-in fade-in slide-in-from-top-2",
+                  notification.type === 'success' && "bg-green-50 text-green-700 border border-green-200",
+                  notification.type === 'info' && "bg-blue-50 text-blue-700 border border-blue-200",
+                  notification.type === 'error' && "bg-red-50 text-red-700 border border-red-200"
+                )}>
+                  {notification.type === 'success' && <CheckCircle2 className="w-4 h-4 mr-2" />}
+                  {notification.type === 'info' && <RefreshCw className="w-4 h-4 mr-2" />}
+                  {notification.type === 'error' && <AlertTriangle className="w-4 h-4 mr-2" />}
+                  {notification.message}
+                </div>
+              )}
 
               <div className="flex justify-end space-x-2 mt-4">
                  <button onClick={onEdit} className="p-2 text-[#6c757d] hover:text-[#212529] hover:bg-[#f8f9fa] rounded-lg transition-colors" title="Modifier">

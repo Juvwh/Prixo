@@ -148,13 +148,45 @@ export function Dashboard() {
     }
   };
 
+  const [notification, setNotification] = useState<{ message: string, type: 'success' | 'info' | 'error' } | null>(null);
+
+  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'info') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
   const handleRefreshItem = async (id: string) => {
     setIsRefreshing(true);
+    setNotification(null);
     try {
       const refreshItemPrice = httpsCallable(functions, 'refreshItemPrice');
-      await refreshItemPrice({ itemId: id });
+      const result = await refreshItemPrice({ itemId: id });
+      const data = result.data as any;
+
+      // Mettre à jour l'élément sélectionné avec les nouvelles données
+      setSelectedItem((prev: any) => {
+        if (prev && prev.id === id) {
+          return {
+            ...prev,
+            currentPrice: data.newPrice !== undefined ? data.newPrice : prev.currentPrice,
+            lastChecked: new Date().toISOString(),
+            isScraping: false,
+            scrapeError: data.newPrice === null ? "Impossible de récupérer le prix sur ce site." : null
+          };
+        }
+        return prev;
+      });
+
+      // Afficher un message de confirmation
+      if (data.success && data.newPrice !== undefined) {
+         showNotification(`Prix mis à jour : ${data.newPrice}€`, 'success');
+      } else if (data.success && data.message) {
+         showNotification(`Le prix n'a pas changé (${data.currentPrice}€).`, 'info');
+      }
+
     } catch (error) {
       console.error("Error refreshing item: ", error);
+      showNotification("Erreur lors de l'actualisation.", 'error');
     } finally {
       setIsRefreshing(false);
     }
@@ -278,6 +310,7 @@ export function Dashboard() {
         onDelete={handleDeleteItem}
         onEdit={() => setIsEditModalOpen(true)}
         isRefreshing={isRefreshing}
+        notification={notification}
       />
 
       <EditItemModal
