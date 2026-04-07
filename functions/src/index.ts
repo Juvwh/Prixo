@@ -3,9 +3,6 @@ import * as admin from 'firebase-admin';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 import { Resend } from 'resend';
-import cors from 'cors';
-
-const corsHandler = cors({ origin: true });
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -96,93 +93,67 @@ async function scrapePrice(url: string): Promise<number | null> {
 export const refreshItemPrice = functions
   .region('europe-west1')
   .runWith({ memory: '2GB', timeoutSeconds: 300 })
-  .https.onRequest((req, res) => {
-    return corsHandler(req, res, async () => {
-      try {
-        // Parse the token from the Authorization header
-        const authHeader = req.headers.authorization;
-        let idToken;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-          idToken = authHeader.split('Bearer ')[1];
-        } else {
-          res.status(401).json({ error: { message: 'User must be logged in.', status: 'UNAUTHENTICATED' } });
-          return;
-        }
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
+    }
 
-        let decodedIdToken;
-        try {
-          decodedIdToken = await admin.auth().verifyIdToken(idToken);
-        } catch (error) {
-          res.status(401).json({ error: { message: 'Invalid token.', status: 'UNAUTHENTICATED' } });
-          return;
-        }
+    const { itemId } = data;
+    if (!itemId) {
+      throw new functions.https.HttpsError('invalid-argument', 'Item ID is required.');
+    }
 
-        const data = req.body.data;
-        if (!data || !data.itemId) {
-          res.status(400).json({ error: { message: 'Item ID is required.', status: 'INVALID_ARGUMENT' } });
-          return;
-        }
+    const itemRef = db.collection('items').doc(itemId);
+    const itemSnap = await itemRef.get();
 
-        const { itemId } = data;
+    if (!itemSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Item not found.');
+    }
 
-        const itemRef = db.collection('items').doc(itemId);
-        const itemSnap = await itemRef.get();
+    const itemData = itemSnap.data();
+    if (itemData?.userId !== context.auth.uid && itemData?.isPrivate) {
+        throw new functions.https.HttpsError('permission-denied', 'Cannot refresh private item.');
+    }
 
-        if (!itemSnap.exists) {
-          res.status(404).json({ error: { message: 'Item not found.', status: 'NOT_FOUND' } });
-          return;
-        }
+    const newPrice = await scrapePrice(itemData?.url);
 
-        const itemData = itemSnap.data();
-        if (itemData?.userId !== decodedIdToken.uid && itemData?.isPrivate) {
-          res.status(403).json({ error: { message: 'Cannot refresh private item.', status: 'PERMISSION_DENIED' } });
-          return;
-        }
+    if (newPrice !== null && newPrice !== itemData?.currentPrice) {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const newHistoryEntry = { date: today, price: newPrice };
 
-        const newPrice = await scrapePrice(itemData?.url);
-
-        if (newPrice !== null && newPrice !== itemData?.currentPrice) {
-          const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-          const newHistoryEntry = { date: today, price: newPrice };
-
-          let history = itemData?.history || [];
-          // If we already have an entry for today, replace it, otherwise append
-          if (history.length > 0 && history[history.length - 1].date === today) {
-             history[history.length - 1] = newHistoryEntry;
-          } else {
-             history.push(newHistoryEntry);
-          }
-
-          await itemRef.update({
-            currentPrice: newPrice,
-            history: history,
-            lastChecked: new Date().toISOString(),
-            isScraping: false,
-            scrapeError: admin.firestore.FieldValue.delete()
-          });
-
-          res.status(200).json({ data: { success: true, newPrice } });
-        } else {
-          // Just update the last check time, and handle potential failure
-          const updateData: any = {
-            lastChecked: new Date().toISOString(),
-            isScraping: false
-          };
-
-          if (newPrice === null) {
-            updateData.scrapeError = "Impossible de récupérer le prix sur ce site.";
-          } else {
-            updateData.scrapeError = admin.firestore.FieldValue.delete();
-          }
-
-          await itemRef.update(updateData);
-          res.status(200).json({ data: { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice } });
-        }
-      } catch (error) {
-        console.error("Error in refreshItemPrice:", error);
-        res.status(500).json({ error: { message: 'Internal server error.', status: 'INTERNAL' } });
+      let history = itemData?.history || [];
+      // If we already have an entry for today, replace it, otherwise append
+      if (history.length > 0 && history[history.length - 1].date === today) {
+         history[history.length - 1] = newHistoryEntry;
+      } else {
+         history.push(newHistoryEntry);
       }
-    });
+
+      await itemRef.update({
+        currentPrice: newPrice,
+        history: history,
+        lastChecked: new Date().toISOString(),
+        isScraping: false,
+        scrapeError: admin.firestore.FieldValue.delete()
+      });
+
+      return { success: true, newPrice };
+    } else {
+      // Just update the last check time, and handle potential failure
+      const updateData: any = {
+        lastChecked: new Date().toISOString(),
+        isScraping: false
+      };
+
+      if (newPrice === null) {
+        updateData.scrapeError = "Impossible de récupérer le prix sur ce site.";
+      } else {
+        updateData.scrapeError = admin.firestore.FieldValue.delete();
+      }
+
+      await itemRef.update(updateData);
+      return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice };
+    }
 });
 
 // Scheduled function to scrape all items and send summary email
