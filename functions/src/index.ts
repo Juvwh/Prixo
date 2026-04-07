@@ -36,7 +36,16 @@ async function scrapePrice(url: string): Promise<number | null> {
               if (item.offers) {
                 const offers = Array.isArray(item.offers) ? item.offers : [item.offers];
                 for(const offer of offers) {
-                  if (offer.price) return parseFloat(offer.price);
+                  if (offer.price) {
+                    return parseFloat(offer.price);
+                  } else if (offer.lowPrice) {
+                    return parseFloat(offer.lowPrice);
+                  } else if (offer.offers) {
+                    const subOffers = Array.isArray(offer.offers) ? offer.offers : [offer.offers];
+                    for(const subOffer of subOffers) {
+                      if (subOffer.price) return parseFloat(subOffer.price);
+                    }
+                  }
                 }
               }
             }
