@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, RefreshCw, ExternalLink, Edit2, Trash2 } from 'lucide-react';
+import { X, RefreshCw, ExternalLink, Edit2, Trash2, AlertTriangle } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis, XAxis, Tooltip, CartesianGrid } from 'recharts';
 import { cn } from '../utils/cn';
 
@@ -9,10 +9,11 @@ interface ItemDetailModalProps {
   item: any; // Type properly later based on Firestore data
   onRefresh: (id: string) => void;
   onDelete: (id: string) => void;
+  onEdit: () => void;
   isRefreshing?: boolean;
 }
 
-export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, isRefreshing }: ItemDetailModalProps) {
+export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, onEdit, isRefreshing }: ItemDetailModalProps) {
   if (!isOpen || !item) return null;
 
   const formattedPrice = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(item.currentPrice);
@@ -66,8 +67,11 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, is
                 </button>
               </div>
 
-              <div className="flex justify-end space-x-2">
-                 <button onClick={() => onDelete(item.id)} className="p-2 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+              <div className="flex justify-end space-x-2 mt-4">
+                 <button onClick={onEdit} className="p-2 text-[#6c757d] hover:text-[#212529] hover:bg-[#f8f9fa] rounded-lg transition-colors" title="Modifier">
+                    <Edit2 className="w-5 h-5" />
+                 </button>
+                 <button onClick={() => onDelete(item.id)} className="p-2 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Supprimer">
                     <Trash2 className="w-5 h-5" />
                  </button>
               </div>
@@ -77,9 +81,22 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, is
             <div className="space-y-8 flex flex-col">
               <div>
                 <p className="text-sm font-medium text-[#6c757d] uppercase tracking-wider mb-2">{item.category}</p>
-                <div className="flex items-baseline space-x-3">
-                  <p className="text-4xl sm:text-5xl font-bold text-[#212529]">{formattedPrice}</p>
-                </div>
+
+                {item.scrapeError ? (
+                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+                     <div className="flex items-start">
+                       <AlertTriangle className="w-5 h-5 text-amber-500 mr-3 shrink-0 mt-0.5" />
+                       <div>
+                         <h4 className="text-sm font-semibold text-amber-800">Erreur lors de la récupération du prix</h4>
+                         <p className="text-sm text-amber-700 mt-1">{item.scrapeError}</p>
+                       </div>
+                     </div>
+                   </div>
+                ) : (
+                  <div className="flex items-baseline space-x-3">
+                    <p className="text-4xl sm:text-5xl font-bold text-[#212529]">{formattedPrice}</p>
+                  </div>
+                )}
                 <p className="text-sm text-[#6c757d] mt-2">Dernière vérification : {new Date(item.lastChecked).toLocaleDateString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
               </div>
 

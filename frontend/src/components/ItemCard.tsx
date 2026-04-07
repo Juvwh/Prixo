@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowDownRight, ArrowUpRight, Lock, Heart } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Lock, Heart, AlertTriangle } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 import { cn } from '../utils/cn';
 
@@ -17,10 +17,12 @@ interface ItemCardProps {
   isPrivate: boolean;
   isFavorite: boolean;
   history: PriceHistory[];
+  isScraping?: boolean;
+  scrapeError?: string;
   onClick: () => void;
 }
 
-export function ItemCard({ name, category, currentPrice, imageUrl, isPrivate, isFavorite, history, onClick }: ItemCardProps) {
+export function ItemCard({ name, category, currentPrice, imageUrl, isPrivate, isFavorite, history, isScraping, scrapeError, onClick }: ItemCardProps) {
   // Determine if price went down based on last two records
   const priceDropped = history.length > 1 && history[history.length - 1].price < history[history.length - 2].price;
   const priceIncreased = history.length > 1 && history[history.length - 1].price > history[history.length - 2].price;
@@ -61,18 +63,29 @@ export function ItemCard({ name, category, currentPrice, imageUrl, isPrivate, is
 
         <div className="flex items-end justify-between">
           <div>
-            <p className="text-2xl font-bold text-[#212529]">{formattedPrice}</p>
-            {priceDropped && (
-              <div className="flex items-center text-[#a8d5ba] mt-1 text-sm font-medium">
-                <ArrowDownRight className="w-4 h-4 mr-1" />
-                <span>Baisse de prix</span>
+            {isScraping ? (
+              <p className="text-sm text-[#6c757d] animate-pulse">Recherche en cours...</p>
+            ) : scrapeError ? (
+              <div className="flex items-center text-amber-500" title={scrapeError}>
+                <AlertTriangle className="w-6 h-6 mr-2" />
+                <span className="text-sm font-medium">Erreur de prix</span>
               </div>
-            )}
-            {priceIncreased && (
-              <div className="flex items-center text-red-400 mt-1 text-sm font-medium">
-                <ArrowUpRight className="w-4 h-4 mr-1" />
-                <span>Hausse de prix</span>
-              </div>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-[#212529]">{formattedPrice}</p>
+                {priceDropped && (
+                  <div className="flex items-center text-[#a8d5ba] mt-1 text-sm font-medium">
+                    <ArrowDownRight className="w-4 h-4 mr-1" />
+                    <span>Baisse de prix</span>
+                  </div>
+                )}
+                {priceIncreased && (
+                  <div className="flex items-center text-red-400 mt-1 text-sm font-medium">
+                    <ArrowUpRight className="w-4 h-4 mr-1" />
+                    <span>Hausse de prix</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
