@@ -1,41 +1,123 @@
-import React from 'react';
-import { Home, PlusSquare, LogOut, Settings } from 'lucide-react';
+import React, { useState } from 'react';
+import { Home, PlusSquare, LogOut, Heart, Menu, Lock } from 'lucide-react';
 import { cn } from '../utils/cn';
+
+export interface CategoryData {
+  name: string;
+  isAllPrivate: boolean;
+}
 
 interface SidebarProps {
   onAddClick: () => void;
   onLogout: () => void;
   className?: string;
+  categories: CategoryData[];
+  selectedCategory: string | null;
+  onSelectCategory: (category: string | null) => void;
+  userEmail?: string | null;
 }
 
-export function Sidebar({ onAddClick, onLogout, className }: SidebarProps) {
+export function Sidebar({ onAddClick, onLogout, className, categories, selectedCategory, onSelectCategory, userEmail }: SidebarProps) {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
   return (
     <>
-      {/* Desktop Sidebar */}
-      <aside className={cn("hidden md:flex flex-col w-64 h-screen bg-white border-r border-[#dee2e6] fixed left-0 top-0", className)}>
+      {/* Mobile Top Bar */}
+      <div className="md:hidden fixed top-0 left-0 w-full bg-white border-b border-[#dee2e6] px-4 py-3 flex justify-between items-center z-40">
+        <h1 className="text-xl font-bold text-[#212529] tracking-tight">Prixo</h1>
+        <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-[#212529]">
+          <Menu className="w-6 h-6" />
+        </button>
+      </div>
+
+      {/* Mobile Overlay */}
+      {isMobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/20 z-40"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside className={cn(
+        "fixed md:flex flex-col w-3/4 max-w-sm md:w-64 h-screen bg-[#fafafa] md:bg-white border-r border-[#f0f0f0] left-0 top-0 z-50 transition-transform duration-300 ease-in-out",
+        !isMobileMenuOpen && "-translate-x-full md:translate-x-0",
+        className
+      )}>
         <div className="p-6">
           <h1 className="text-2xl font-bold text-[#212529] tracking-tight">Prixo</h1>
         </div>
 
-        <nav className="flex-1 px-4 space-y-2">
-          <button className="flex items-center w-full px-4 py-3 text-sm font-medium text-[#212529] bg-[#f8f9fa] rounded-xl">
+        <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
+          <button
+            onClick={() => { onSelectCategory(null); setIsMobileMenuOpen(false); }}
+            className={cn(
+              "flex items-center w-full px-4 py-3 text-sm font-medium rounded-xl transition-colors",
+              selectedCategory === null
+                ? "text-[#212529] bg-[#eef2f0]"
+                : "text-[#6c757d] hover:bg-[#eef2f0]/50"
+            )}
+          >
             <Home className="w-5 h-5 mr-3" />
-            Accueil
+            Tous les articles
           </button>
 
           <button
-            onClick={onAddClick}
-            className="flex items-center w-full px-4 py-3 text-sm font-medium text-white bg-[#212529] rounded-xl hover:bg-black transition-colors"
+            onClick={() => { onSelectCategory('favorites'); setIsMobileMenuOpen(false); }}
+            className={cn(
+              "flex items-center w-full px-4 py-3 text-sm font-medium rounded-xl transition-colors",
+              selectedCategory === 'favorites'
+                ? "text-[#212529] bg-[#eef2f0]"
+                : "text-[#6c757d] hover:bg-[#eef2f0]/50"
+            )}
           >
-            <PlusSquare className="w-5 h-5 mr-3" />
-            Ajouter un article
+            <Heart className="w-5 h-5 mr-3" />
+            Coups de cœur
           </button>
+
+          <div className="pt-6 pb-2">
+            <p className="px-4 text-xs font-semibold text-[#adb5bd] uppercase tracking-wider">Tableaux</p>
+          </div>
+
+          {categories.map((cat) => (
+            <button
+              key={cat.name}
+              onClick={() => { onSelectCategory(cat.name); setIsMobileMenuOpen(false); }}
+              className={cn(
+                "flex items-center justify-between w-full px-4 py-2.5 text-sm font-medium rounded-xl transition-colors",
+                selectedCategory === cat.name
+                  ? "text-[#212529] bg-[#eef2f0]"
+                  : "text-[#6c757d] hover:bg-[#eef2f0]/50"
+              )}
+            >
+              <span className="truncate">{cat.name}</span>
+              {cat.isAllPrivate && <Lock className="w-3.5 h-3.5 ml-2 shrink-0 opacity-50" />}
+            </button>
+          ))}
+
+          <div className="pt-4">
+            <button
+              onClick={onAddClick}
+              className="flex items-center w-full px-4 py-3 text-sm font-medium text-white bg-[#212529] rounded-xl hover:bg-black transition-colors"
+            >
+              <PlusSquare className="w-5 h-5 mr-3" />
+              Ajouter un article
+            </button>
+          </div>
         </nav>
 
-        <div className="p-4 border-t border-[#dee2e6]">
+        <div className="p-4 border-t border-[#f0f0f0] bg-white">
+          <div className="flex items-center mb-4 px-2">
+            <div className="w-8 h-8 rounded-full bg-[#eef2f0] flex items-center justify-center text-[#212529] font-bold text-xs uppercase shrink-0">
+               {userEmail ? userEmail.charAt(0) : 'U'}
+            </div>
+            <div className="ml-3 overflow-hidden">
+               <p className="text-sm font-medium text-[#212529] truncate">{userEmail || 'Utilisateur'}</p>
+            </div>
+          </div>
           <button
             onClick={onLogout}
-            className="flex items-center w-full px-4 py-2 text-sm font-medium text-[#6c757d] hover:text-[#212529] transition-colors"
+            className="flex items-center w-full px-2 py-2 text-sm font-medium text-[#6c757d] hover:text-[#212529] transition-colors rounded-lg"
           >
             <LogOut className="w-5 h-5 mr-3" />
             Déconnexion
@@ -43,26 +125,15 @@ export function Sidebar({ onAddClick, onLogout, className }: SidebarProps) {
         </div>
       </aside>
 
-      {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 w-full bg-white border-t border-[#dee2e6] flex justify-around p-3 z-50">
-        <button className="flex flex-col items-center p-2 text-[#212529]">
-          <Home className="w-6 h-6" />
-          <span className="text-[10px] mt-1 font-medium">Accueil</span>
-        </button>
+      {/* Mobile Bottom Action (Floating Add Button) */}
+      <div className="md:hidden fixed bottom-6 right-6 z-40">
         <button
           onClick={onAddClick}
-          className="flex flex-col items-center p-2 text-white bg-[#212529] rounded-full -mt-6 shadow-lg border-4 border-[#f8f9fa]"
+          className="flex items-center justify-center w-14 h-14 text-white bg-[#212529] rounded-full shadow-lg hover:scale-105 transition-transform"
         >
           <PlusSquare className="w-6 h-6" />
         </button>
-        <button
-          onClick={onLogout}
-          className="flex flex-col items-center p-2 text-[#6c757d]"
-        >
-          <LogOut className="w-6 h-6" />
-          <span className="text-[10px] mt-1 font-medium">Quitter</span>
-        </button>
-      </nav>
+      </div>
     </>
   );
 }

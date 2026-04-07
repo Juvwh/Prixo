@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { ItemCard } from '../components/ItemCard';
 import { AddItemModal } from '../components/AddItemModal';
+import { EditItemModal } from '../components/EditItemModal';
 import { ItemDetailModal } from '../components/ItemDetailModal';
 import Masonry from 'react-masonry-css';
 import { auth, db, functions } from '../firebase/config';
 import { signOut } from 'firebase/auth';
-import { collection, query, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, orderBy, where, or } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, orderBy, where, or } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
@@ -83,9 +84,11 @@ const mockItems = [
 
 export function Dashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [items, setItems] = useState<any[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -120,15 +123,26 @@ export function Dashboard() {
   const handleAddItem = async (data: any) => {
     if (!user) return;
     try {
-      await addDoc(collection(db, 'items'), {
+      const docRef = await addDoc(collection(db, 'items'), {
         ...data,
         userId: user.uid,
         currentPrice: 0, // Will be updated by initial scrape
         history: [],
         createdAt: serverTimestamp(),
-        lastChecked: new Date().toISOString()
+        lastChecked: new Date().toISOString(),
+        isScraping: true // Indicateur visuel "Recherche en cours"
       });
-      // Optionally call refresh function immediately here
+
+      // Call refresh function immediately here
+      try {
+        const refreshItemPrice = httpsCallable(functions, 'refreshItemPrice');
+        await refreshItemPrice({ itemId: docRef.id });
+      } catch (err) {
+        console.error("Error refreshing new item: ", err);
+      } finally {
+        // Au cas où la cloud function ne mettrait pas à jour isScraping si elle plante en plein milieu
+        // updateDoc(docRef, { isScraping: false }) serait utile, mais le rafraîchissement peut être géré par l'événement onChange onSnapshot
+      }
     } catch (error) {
       console.error("Error adding document: ", error);
     }
@@ -157,6 +171,44 @@ export function Dashboard() {
     }
   };
 
+  const handleEditItem = async (id: string, data: any) => {
+    try {
+      await updateDoc(doc(db, 'items', id), data);
+
+      // Update selectedItem state to reflect changes in ItemDetailModal if it's open
+      setSelectedItem((prev: any) => prev && prev.id === id ? { ...prev, ...data } : prev);
+    } catch (error) {
+      console.error("Error updating document: ", error);
+    }
+  };
+
+  // Calculate dynamic categories from items
+  const categoriesMap = new Map<string, { total: number; privateCount: number }>();
+  items.forEach(item => {
+    if (!item.category) return;
+    const cat = item.category.trim();
+    if (!categoriesMap.has(cat)) {
+      categoriesMap.set(cat, { total: 0, privateCount: 0 });
+    }
+    const data = categoriesMap.get(cat)!;
+    data.total += 1;
+    if (item.isPrivate) {
+      data.privateCount += 1;
+    }
+  });
+
+  const categoriesData = Array.from(categoriesMap.entries()).map(([name, data]) => ({
+    name,
+    isAllPrivate: data.total > 0 && data.total === data.privateCount
+  })).sort((a, b) => a.name.localeCompare(b.name));
+
+  // Filter items based on selected category
+  const displayedItems = items.filter(item => {
+    if (selectedCategory === 'favorites') return item.isFavorite;
+    if (selectedCategory !== null) return item.category?.trim() === selectedCategory;
+    return true; // null means 'All'
+  });
+
   const breakpointColumnsObj = {
     default: 4,
     1536: 4, // 2xl
@@ -166,17 +218,27 @@ export function Dashboard() {
     640: 1   // sm
   };
 
+  const getPageTitle = () => {
+    if (selectedCategory === 'favorites') return "Coups de cœur";
+    if (selectedCategory) return selectedCategory;
+    return "Tous les articles";
+  };
+
   return (
     <div className="min-h-screen bg-[#f8f9fa] flex">
       <Sidebar
         onAddClick={() => setIsAddModalOpen(true)}
         onLogout={handleLogout}
+        categories={categoriesData}
+        selectedCategory={selectedCategory}
+        onSelectCategory={setSelectedCategory}
+        userEmail={user?.email}
       />
 
-      <main className="flex-1 md:ml-64 p-4 sm:p-6 lg:p-8 pb-24 md:pb-8">
+      <main className="flex-1 md:ml-64 p-4 sm:p-6 lg:p-8 pt-20 md:pt-8 pb-24 md:pb-8">
         <div className="max-w-7xl mx-auto">
           <header className="mb-8">
-            <h2 className="text-3xl font-bold text-[#212529] tracking-tight">Mes Articles</h2>
+            <h2 className="text-3xl font-bold text-[#212529] tracking-tight">{getPageTitle()}</h2>
             <p className="text-[#6c757d] mt-2">Suivez l'évolution des prix de vos articles favoris.</p>
           </header>
 
@@ -185,12 +247,12 @@ export function Dashboard() {
             className="flex w-auto -ml-6"
             columnClassName="pl-6 bg-clip-padding"
           >
-            {items.length === 0 ? (
+            {displayedItems.length === 0 ? (
               <div className="col-span-full text-center py-20 text-[#6c757d]">
-                Aucun article suivi. Commencez par en ajouter un !
+                Aucun article dans cette catégorie.
               </div>
             ) : (
-              items.map(item => (
+              displayedItems.map(item => (
                 <ItemCard
                   key={item.id}
                   {...item}
@@ -214,7 +276,15 @@ export function Dashboard() {
         item={selectedItem}
         onRefresh={handleRefreshItem}
         onDelete={handleDeleteItem}
+        onEdit={() => setIsEditModalOpen(true)}
         isRefreshing={isRefreshing}
+      />
+
+      <EditItemModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onSubmit={handleEditItem}
+        item={selectedItem}
       />
     </div>
   );

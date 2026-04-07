@@ -160,15 +160,25 @@ exports.refreshItemPrice = functions
         await itemRef.update({
             currentPrice: newPrice,
             history: history,
-            lastChecked: new Date().toISOString()
+            lastChecked: new Date().toISOString(),
+            isScraping: false,
+            scrapeError: admin.firestore.FieldValue.delete()
         });
         return { success: true, newPrice };
     }
     else {
-        // Just update the last check time
-        await itemRef.update({
-            lastChecked: new Date().toISOString()
-        });
+        // Just update the last check time, and handle potential failure
+        const updateData = {
+            lastChecked: new Date().toISOString(),
+            isScraping: false
+        };
+        if (newPrice === null) {
+            updateData.scrapeError = "Impossible de récupérer le prix sur ce site.";
+        }
+        else {
+            updateData.scrapeError = admin.firestore.FieldValue.delete();
+        }
+        await itemRef.update(updateData);
         return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice };
     }
 });
