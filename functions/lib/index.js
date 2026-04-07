@@ -99,14 +99,19 @@ async function scrapePrice(url) {
             return jsonLdData;
         // 2. Fallback to common CSS selectors if JSON-LD fails
         const priceText = await page.evaluate(() => {
-            // List of common selectors for IKEA, Maisons du Monde, etc.
+            // List of common selectors for IKEA, Maisons du Monde, Amazon etc.
             const selectors = [
                 '.pip-temp-price__integer', // IKEA
                 '[data-test-target="price"]',
                 '.price',
                 '.current-price',
                 'span[itemprop="price"]',
-                '.product-price'
+                '.product-price',
+                '.a-price .a-offscreen', // Amazon
+                '.a-price.a-text-price .a-offscreen', // Amazon
+                '#priceblock_ourprice', // Amazon old
+                '#priceblock_dealprice', // Amazon old
+                '#corePriceDisplay_desktop_feature_div .a-price .a-offscreen' // Amazon
             ];
             for (const selector of selectors) {
                 const el = document.querySelector(selector);
@@ -184,13 +189,18 @@ exports.refreshItemPrice = functions
             isScraping: false
         };
         if (newPrice === null) {
-            updateData.scrapeError = "Impossible de récupérer le prix sur ce site.";
+            if (itemData?.url && itemData.url.toLowerCase().includes('amazon.')) {
+                updateData.scrapeError = "Impossible de récupérer le prix sur Amazon en raison de leurs protections anti-bots.";
+            }
+            else {
+                updateData.scrapeError = "Impossible de récupérer le prix sur ce site.";
+            }
         }
         else {
             updateData.scrapeError = admin.firestore.FieldValue.delete();
         }
         await itemRef.update(updateData);
-        return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice };
+        return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice, scrapeError: updateData.scrapeError };
     }
 });
 // Scheduled function to scrape all items and send summary email
