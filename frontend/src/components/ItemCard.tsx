@@ -16,6 +16,7 @@ interface ItemCardProps {
   boards?: string[];
   currentPrice: number;
   imageUrl?: string;
+  url?: string;
   isPrivate: boolean;
   isFavorite: boolean;
   history: PriceHistory[];
@@ -24,7 +25,7 @@ interface ItemCardProps {
   onClick: () => void;
 }
 
-export function ItemCard({ id, name, boards, currentPrice, imageUrl, isPrivate, isFavorite, history, isScraping, scrapeError, onClick }: ItemCardProps) {
+export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPrivate, isFavorite, history, isScraping, scrapeError, onClick }: ItemCardProps) {
   const {
     attributes,
     listeners,
@@ -36,7 +37,7 @@ export function ItemCard({ id, name, boards, currentPrice, imageUrl, isPrivate, 
     id: id,
     data: {
       type: 'item',
-      item: { id, name, boards, currentPrice, imageUrl, isPrivate, isFavorite, history, isScraping, scrapeError }
+      item: { id, name, boards, currentPrice, imageUrl, url, isPrivate, isFavorite, history, isScraping, scrapeError }
     }
   });
 
@@ -88,9 +89,16 @@ export function ItemCard({ id, name, boards, currentPrice, imageUrl, isPrivate, 
       </div>
 
       <div className="p-5">
-        {/* Placeholder: On affichera potentiellement le premier tableau ici, ou rien */}
-        {boards && boards.length > 0 && (
-           <p className="text-xs font-medium text-[#6c757d] uppercase tracking-wider mb-1 line-clamp-1">{boards.join(', ')}</p>
+        {url && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs font-medium text-[#6c757d] hover:text-[#212529] uppercase tracking-wider mb-1 line-clamp-1 block transition-colors duration-200"
+          >
+            Voir sur le site
+          </a>
         )}
         <h3 className="text-lg font-semibold text-[#212529] leading-tight mb-4 line-clamp-2">{name}</h3>
 
