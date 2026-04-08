@@ -27,7 +27,7 @@ import {
 } from '@dnd-kit/sortable';
 import { useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Trash2 } from 'lucide-react';
+import { Trash2, ListChecks } from 'lucide-react';
 
 // --- MOCK DATA FOR UI DEVELOPMENT ---
 const mockHistory = [
@@ -109,6 +109,8 @@ export function Dashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
   const [showPrivateItems, setShowPrivateItems] = useState(false);
+  const [isSelectionModeActive, setIsSelectionModeActive] = useState(false);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const { user } = useAuth();
 
   // Fetch Items
@@ -472,8 +474,39 @@ export function Dashboard() {
     return "Tous les articles";
   };
 
-  const totalValue = displayedItems.reduce((sum, item) => sum + (item.currentPrice || 0), 0);
+  const isSelectionActive = isSelectionModeActive && selectedItemIds.length > 0;
+
+  const totalValue = isSelectionActive
+    ? displayedItems
+        .filter(item => selectedItemIds.includes(item.id))
+        .reduce((sum, item) => sum + (item.currentPrice || 0), 0)
+    : displayedItems.reduce((sum, item) => sum + (item.currentPrice || 0), 0);
+
   const formattedTotal = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(totalValue);
+
+  const handleToggleSelectionMode = () => {
+    setIsSelectionModeActive(!isSelectionModeActive);
+  };
+
+  const handleSelectAll = () => {
+    setSelectedItemIds(displayedItems.map(item => item.id));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedItemIds([]);
+  };
+
+  const handleItemClick = (item: any) => {
+    if (isSelectionModeActive) {
+      setSelectedItemIds(prev =>
+        prev.includes(item.id)
+          ? prev.filter(id => id !== item.id)
+          : [...prev, item.id]
+      );
+    } else {
+      setSelectedItem(item);
+    }
+  };
 
   return (
     <DndContext
@@ -510,25 +543,61 @@ export function Dashboard() {
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="inline-flex items-center px-4 py-2 bg-[#eef2f0] rounded-xl text-[#212529]">
-                <span className="text-sm font-medium mr-2">Valeur cumulée :</span>
+                <span className="text-sm font-medium mr-2">
+                  {isSelectionActive ? "Valeur sélectionnée :" : "Valeur cumulée :"}
+                </span>
                 <span className="text-lg font-bold">{formattedTotal}</span>
               </div>
 
-              <div className="flex items-center">
-                <span className="text-sm font-medium text-[#6c757d] mr-3">Afficher mes articles privés</span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={showPrivateItems}
-                    onChange={e => setShowPrivateItems(e.target.checked)}
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#a8d5ba]"></div>
-                </label>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center">
+                  <span className="text-sm font-medium text-[#6c757d] mr-3">Afficher mes articles privés</span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={showPrivateItems}
+                      onChange={e => setShowPrivateItems(e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#a8d5ba]"></div>
+                  </label>
+                </div>
+
+                <button
+                  onClick={handleToggleSelectionMode}
+                  className={`p-2 rounded-full transition-colors flex items-center justify-center ${
+                    isSelectionModeActive ? 'bg-[#a8d5ba] text-white shadow-md' : 'text-[#6c757d] hover:bg-gray-100'
+                  }`}
+                  title="Mode sélection"
+                >
+                  <ListChecks size={20} />
+                </button>
               </div>
             </div>
 
-            <p className="text-[#6c757d] mt-4">Suivez l'évolution des prix de vos articles favoris.</p>
+            {isSelectionModeActive && (
+              <div className="flex items-center gap-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                <button
+                  onClick={handleSelectAll}
+                  className="text-sm font-medium text-[#212529] bg-white border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+                >
+                  Tout sélectionner
+                </button>
+                <button
+                  onClick={handleClearSelection}
+                  className="text-sm font-medium text-[#6c757d] hover:text-[#212529] px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Tout désélectionner
+                </button>
+                <span className="text-sm text-[#6c757d] ml-auto">
+                  {selectedItemIds.length} article(s) sélectionné(s)
+                </span>
+              </div>
+            )}
+
+            {!isSelectionModeActive && (
+               <p className="text-[#6c757d] mt-4">Suivez l'évolution des prix de vos articles favoris.</p>
+            )}
           </header>
 
           <SortableContext
@@ -549,7 +618,9 @@ export function Dashboard() {
                   <ItemCard
                     key={item.id}
                     {...item}
-                    onClick={() => setSelectedItem(item)}
+                    isSelected={selectedItemIds.includes(item.id)}
+                    isSelectionModeActive={isSelectionModeActive}
+                    onClick={() => handleItemClick(item)}
                   />
                 ))
               )}
