@@ -618,7 +618,7 @@ export function Dashboard() {
                   <ItemCard
                     key={item.id}
                     {...item}
-                    isSelected={selectedItemIds.includes(item.id)}
+                    isSelected={isSelectionModeActive && selectedItemIds.includes(item.id)}
                     isSelectionModeActive={isSelectionModeActive}
                     onClick={() => handleItemClick(item)}
                   />
