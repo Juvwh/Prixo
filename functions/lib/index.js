@@ -67,7 +67,7 @@ async function scrapePrice(url) {
                     // Check for single product or array
                     const items = Array.isArray(data) ? data : [data];
                     for (const item of items) {
-                        if (item['@type'] === 'Product' || item['@type'] === 'ItemPage') {
+                        if (item['@type'] === 'Product' || item['@type'] === 'ItemPage' || item['@type'] === 'ProductGroup') {
                             if (item.offers) {
                                 const offers = Array.isArray(item.offers) ? item.offers : [item.offers];
                                 for (const offer of offers) {
@@ -82,6 +82,20 @@ async function scrapePrice(url) {
                                         for (const subOffer of subOffers) {
                                             if (subOffer.price)
                                                 return parseFloat(subOffer.price);
+                                        }
+                                    }
+                                }
+                            }
+                            // Check hasVariant for ProductGroup
+                            if (item.hasVariant) {
+                                const variants = Array.isArray(item.hasVariant) ? item.hasVariant : [item.hasVariant];
+                                for (const variant of variants) {
+                                    if (variant.offers) {
+                                        const offers = Array.isArray(variant.offers) ? variant.offers : [variant.offers];
+                                        for (const offer of offers) {
+                                            if (offer.price) {
+                                                return parseFloat(offer.price);
+                                            }
                                         }
                                     }
                                 }
@@ -191,6 +205,9 @@ exports.refreshItemPrice = functions
         if (newPrice === null) {
             if (itemData?.url && itemData.url.toLowerCase().includes('amazon.')) {
                 updateData.scrapeError = "Impossible de récupérer le prix sur Amazon en raison de leurs protections anti-bots.";
+            }
+            else if (itemData?.url && itemData.url.toLowerCase().includes('maisonsdumonde.')) {
+                updateData.scrapeError = "Impossible de récupérer le prix sur Maisons du Monde en raison de leurs protections anti-bots.";
             }
             else {
                 updateData.scrapeError = "Impossible de récupérer le prix sur ce site.";
