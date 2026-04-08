@@ -8,7 +8,7 @@ import { AddBoardModal } from '../components/AddBoardModal';
 import Masonry from 'react-masonry-css';
 import { auth, db, functions } from '../firebase/config';
 import { signOut } from 'firebase/auth';
-import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, orderBy, where, or } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, setDoc, serverTimestamp, orderBy, where, or } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
   DndContext,
@@ -27,77 +27,7 @@ import {
 } from '@dnd-kit/sortable';
 import { useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Trash2, ListChecks } from 'lucide-react';
-
-// --- MOCK DATA FOR UI DEVELOPMENT ---
-const mockHistory = [
-  { date: '2023-10-01', price: 599 },
-  { date: '2023-10-15', price: 599 },
-  { date: '2023-11-01', price: 549 },
-  { date: '2023-11-15', price: 549 },
-  { date: '2023-11-24', price: 499 }, // Black Friday drop
-];
-
-const mockItems = [
-  {
-    id: '1',
-    name: 'Canapé 3 places KIVIK, avec méridienne, beige clair',
-    category: 'Salon',
-    currentPrice: 499,
-    imageUrl: 'https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
-    isPrivate: false,
-    isFavorite: true,
-    lastChecked: '2023-11-25T08:00:00Z',
-    url: '#',
-    history: mockHistory
-  },
-  {
-    id: '2',
-    name: 'Table à manger extensible LISABO, plaqué frêne',
-    category: 'Salle à manger',
-    currentPrice: 179,
-    imageUrl: 'https://images.unsplash.com/photo-1533090481720-856c6e3c1fdc?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
-    isPrivate: true,
-    isFavorite: false,
-    lastChecked: '2023-11-25T08:00:00Z',
-    url: '#',
-    history: [
-      { date: '2023-10-01', price: 149 },
-      { date: '2023-11-01', price: 179 }, // Price went up
-    ]
-  },
-   {
-    id: '3',
-    name: 'Fauteuil STRANDMON, jaune moutarde',
-    category: 'Salon',
-    currentPrice: 249,
-    imageUrl: 'https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
-    isPrivate: false,
-    isFavorite: false,
-    lastChecked: '2023-11-25T08:00:00Z',
-    url: '#',
-    history: [
-      { date: '2023-10-01', price: 249 },
-      { date: '2023-11-01', price: 249 },
-    ]
-  },
-  {
-    id: '4',
-    name: 'Lampe de table TÄLLBYN, verre opalin/nickelé',
-    category: 'Éclairage',
-    currentPrice: 39.99,
-    imageUrl: 'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80',
-    isPrivate: true,
-    isFavorite: true,
-    lastChecked: '2023-11-25T08:00:00Z',
-    url: '#',
-    history: [
-      { date: '2023-10-01', price: 49.99 },
-      { date: '2023-11-01', price: 39.99 }, // Drop
-    ]
-  }
-];
-// ------------------------------------
+import { Trash2, ListChecks, Bell, ChevronDown } from 'lucide-react';
 
 export function Dashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -112,6 +42,23 @@ export function Dashboard() {
   const [isSelectionModeActive, setIsSelectionModeActive] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const { user } = useAuth();
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [isBellOpen, setIsBellOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<'custom' | 'date_desc' | 'favorites_first' | 'last_change_desc' | 'price_asc' | 'price_desc'>('custom');
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+
+  // Fetch User Profile for notifications
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        setUserProfile(docSnap.data());
+      } else {
+        setUserProfile({ lastNotificationReadAt: null });
+      }
+    });
+    return unsubscribe;
+  }, [user]);
 
   // Fetch Items
   useEffect(() => {
@@ -125,15 +72,7 @@ export function Dashboard() {
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Sort in memory: favorites first, then by creation date (descending)
-      fetchedItems.sort((a, b) => {
-        if (a.isFavorite === b.isFavorite) {
-           const timeA = a.createdAt?.toMillis() || 0;
-           const timeB = b.createdAt?.toMillis() || 0;
-           return timeB - timeA;
-        }
-        return a.isFavorite ? -1 : 1;
-      });
+      // Skip sorting here, it's handled by the display logic.
       setItems(fetchedItems);
     });
     return unsubscribe;
@@ -329,6 +268,44 @@ export function Dashboard() {
     }
   };
 
+  // Calculate unread items for notifications
+  const getLastPriceChangeDate = (item: any) => {
+    if (!item.history || item.history.length < 2) return null;
+    for (let i = item.history.length - 1; i > 0; i--) {
+      if (item.history[i].price !== item.history[i - 1].price) {
+        return item.history[i].date;
+      }
+    }
+    return null;
+  };
+
+  const getPriceDifference = (item: any) => {
+    if (!item.history || item.history.length < 2) return 0;
+    for (let i = item.history.length - 1; i > 0; i--) {
+      if (item.history[i].price !== item.history[i - 1].price) {
+        return item.history[i].price - item.history[i - 1].price;
+      }
+    }
+    return 0;
+  };
+
+  const unreadItems = items.filter(item => {
+    if (item.userId !== user?.uid) return false;
+    const lastChangeDate = getLastPriceChangeDate(item);
+    if (!lastChangeDate) return false;
+
+    const changeDateMs = new Date(lastChangeDate).getTime();
+
+    if (!userProfile?.lastNotificationReadAt) {
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        return changeDateMs > sevenDaysAgo;
+    }
+
+    const readAtMs = userProfile.lastNotificationReadAt.toMillis ? userProfile.lastNotificationReadAt.toMillis() : new Date(userProfile.lastNotificationReadAt).getTime();
+
+    return changeDateMs > readAtMs;
+  });
+
   // Filter and sort items based on selected board
   let displayedItems = items.filter(item => {
     let matchesBoard = true;
@@ -337,7 +314,6 @@ export function Dashboard() {
 
     if (!matchesBoard) return false;
 
-    // Privacy filter
     if (item.isPrivate && item.userId === user?.uid && !showPrivateItems) {
        return false;
     }
@@ -345,19 +321,57 @@ export function Dashboard() {
     return true;
   });
 
-  // If a specific board is selected, sort items according to the board's itemOrder
-  if (selectedBoardId && selectedBoardId !== 'favorites') {
-    const boardDoc = boardsData.find(b => b.id === selectedBoardId);
-    if (boardDoc && boardDoc.itemOrder) {
-      displayedItems.sort((a, b) => {
-        const indexA = boardDoc.itemOrder.indexOf(a.id);
-        const indexB = boardDoc.itemOrder.indexOf(b.id);
-        // If not in order array, push to end
-        const posA = indexA === -1 ? Infinity : indexA;
-        const posB = indexB === -1 ? Infinity : indexB;
-        return posA - posB;
-      });
+  // Apply sorting
+  if (sortBy === 'custom') {
+    if (selectedBoardId && selectedBoardId !== 'favorites') {
+      const boardDoc = boardsData.find(b => b.id === selectedBoardId);
+      if (boardDoc && boardDoc.itemOrder) {
+        displayedItems.sort((a, b) => {
+          const indexA = boardDoc.itemOrder.indexOf(a.id);
+          const indexB = boardDoc.itemOrder.indexOf(b.id);
+          const posA = indexA === -1 ? Infinity : indexA;
+          const posB = indexB === -1 ? Infinity : indexB;
+          return posA - posB;
+        });
+      }
+    } else {
+        // Fallback for custom sort in 'Tous les articles' or 'Coups de coeur'
+        displayedItems.sort((a, b) => {
+          if (a.isFavorite === b.isFavorite) {
+            const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+            const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+            return timeB - timeA;
+          }
+          return a.isFavorite ? -1 : 1;
+        });
     }
+  } else if (sortBy === 'date_desc') {
+    displayedItems.sort((a, b) => {
+      const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+      const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+      return timeB - timeA;
+    });
+  } else if (sortBy === 'favorites_first') {
+    displayedItems.sort((a, b) => {
+      if (a.isFavorite === b.isFavorite) {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+        return timeB - timeA;
+      }
+      return a.isFavorite ? -1 : 1;
+    });
+  } else if (sortBy === 'last_change_desc') {
+    displayedItems.sort((a, b) => {
+      const dateA = getLastPriceChangeDate(a);
+      const dateB = getLastPriceChangeDate(b);
+      const timeA = dateA ? new Date(dateA).getTime() : 0;
+      const timeB = dateB ? new Date(dateB).getTime() : 0;
+      return timeB - timeA;
+    });
+  } else if (sortBy === 'price_asc') {
+    displayedItems.sort((a, b) => (a.currentPrice || 0) - (b.currentPrice || 0));
+  } else if (sortBy === 'price_desc') {
+    displayedItems.sort((a, b) => (b.currentPrice || 0) - (a.currentPrice || 0));
   }
 
   const sensors = useSensors(
@@ -496,6 +510,19 @@ export function Dashboard() {
     setSelectedItemIds([]);
   };
 
+  const handleBellClick = async () => {
+    setIsBellOpen(!isBellOpen);
+    if (!isBellOpen && user && unreadItems.length > 0) {
+      try {
+        await setDoc(doc(db, 'users', user.uid), {
+          lastNotificationReadAt: serverTimestamp()
+        }, { merge: true });
+      } catch (error) {
+        console.error("Error updating read status", error);
+      }
+    }
+  };
+
   const handleItemClick = (item: any) => {
     if (isSelectionModeActive) {
       setSelectedItemIds(prev =>
@@ -550,6 +577,112 @@ export function Dashboard() {
               </div>
 
               <div className="flex items-center gap-4">
+                {/* Sort Menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => setIsSortMenuOpen(!isSortMenuOpen)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-[#6c757d] hover:text-[#212529] hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    Trier
+                    <ChevronDown size={16} />
+                  </button>
+
+                  {isSortMenuOpen && (
+                    <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div className="py-1">
+                        <button
+                          onClick={() => { setSortBy('custom'); setIsSortMenuOpen(false); }}
+                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'custom' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
+                        >
+                          Ordre personnalisé
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('date_desc'); setIsSortMenuOpen(false); }}
+                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'date_desc' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
+                        >
+                          Date d'ajout
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('favorites_first'); setIsSortMenuOpen(false); }}
+                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'favorites_first' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
+                        >
+                          Coups de cœur en premier
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('last_change_desc'); setIsSortMenuOpen(false); }}
+                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'last_change_desc' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
+                        >
+                          Dernier changement de prix
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('price_asc'); setIsSortMenuOpen(false); }}
+                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'price_asc' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
+                        >
+                          Prix croissant
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('price_desc'); setIsSortMenuOpen(false); }}
+                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'price_desc' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
+                        >
+                          Prix décroissant
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bell Icon */}
+                <div className="relative">
+                  <button
+                    onClick={handleBellClick}
+                    className="p-2 rounded-full text-[#6c757d] hover:bg-gray-100 transition-colors relative"
+                    title="Notifications de prix"
+                  >
+                    <Bell size={20} />
+                    {unreadItems.length > 0 && (
+                      <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-[#f8f9fa]">
+                        {unreadItems.length}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Bell Popover */}
+                  {isBellOpen && (
+                    <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                        <span className="font-semibold text-sm text-[#212529]">Modifications de prix</span>
+                        <span className="text-xs text-[#6c757d]">Derniers changements</span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto p-2">
+                        {unreadItems.length === 0 ? (
+                          <div className="text-center py-6 text-sm text-[#6c757d]">
+                            Aucun nouveau changement de prix.
+                          </div>
+                        ) : (
+                          unreadItems.map((item) => {
+                            const diff = getPriceDifference(item);
+                            const isDrop = diff < 0;
+                            return (
+                              <div key={item.id} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors" onClick={() => { setIsBellOpen(false); setSelectedItem(item); }}>
+                                <img src={item.imageUrl} alt={item.name} className="w-12 h-12 object-contain rounded bg-white border border-gray-100" />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-[#212529] truncate">{item.name}</p>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-sm font-bold">{item.currentPrice}€</span>
+                                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${isDrop ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                      {isDrop ? '' : '+'}{diff.toFixed(2)}€
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex items-center">
                   <span className="text-sm font-medium text-[#6c757d] mr-3">Afficher mes articles privés</span>
                   <label className="relative inline-flex items-center cursor-pointer">
