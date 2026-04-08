@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowDownRight, ArrowUpRight, Lock, Heart, AlertTriangle } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Lock, Heart, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 import { cn } from '../utils/cn';
 import { useSortable } from '@dnd-kit/sortable';
@@ -22,10 +22,12 @@ interface ItemCardProps {
   history: PriceHistory[];
   isScraping?: boolean;
   scrapeError?: string;
+  isSelected?: boolean;
+  isSelectionModeActive?: boolean;
   onClick: () => void;
 }
 
-export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPrivate, isFavorite, history, isScraping, scrapeError, onClick }: ItemCardProps) {
+export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPrivate, isFavorite, history, isScraping, scrapeError, isSelected, isSelectionModeActive, onClick }: ItemCardProps) {
   const {
     attributes,
     listeners,
@@ -64,7 +66,8 @@ export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPriv
       {...listeners}
       onClick={onClick}
       className={cn(
-        "group bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer border border-[#dee2e6] break-inside-avoid mb-6 touch-manipulation",
+        "group bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer border break-inside-avoid mb-6 touch-manipulation",
+        isSelected ? "border-2 border-[#a8d5ba] shadow-md ring-2 ring-[#a8d5ba]/20" : "border-[#dee2e6]",
         isDragging && "shadow-2xl scale-[1.02] z-50 relative border-[#a8d5ba]"
       )}
     >
@@ -72,7 +75,10 @@ export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPriv
         <img
           src={imageUrl || defaultImage}
           alt={name}
-          className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105"
+          className={cn(
+            "w-full h-full object-contain transition-transform duration-500 group-hover:scale-105",
+            isSelectionModeActive && !isSelected && "opacity-75"
+          )}
         />
         <div className="absolute top-4 left-4 flex gap-2">
           {isPrivate && (
@@ -86,6 +92,11 @@ export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPriv
             </div>
           )}
         </div>
+        {isSelected && (
+          <div className="absolute top-4 right-4 bg-white rounded-full shadow-sm">
+            <CheckCircle2 className="w-6 h-6 text-[#a8d5ba] fill-[#a8d5ba]/20" />
+          </div>
+        )}
       </div>
 
       <div className="p-5">
