@@ -10,17 +10,27 @@ interface EditBoardModalProps {
   onRefresh: (id: string) => Promise<void>;
   board: BoardData | null;
   isRefreshing?: boolean;
+  boardItems?: any[];
 }
 
-export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh, board, isRefreshing }: EditBoardModalProps) {
+export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh, board, isRefreshing, boardItems = [] }: EditBoardModalProps) {
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showStatusList, setShowStatusList] = useState(false);
+  const [refreshStartTime, setRefreshStartTime] = useState<number | null>(null);
+  const [initialLastChecked, setInitialLastChecked] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     if (board) {
       setName(board.name);
     } else {
       setName('');
+    }
+    // Reset showStatusList when modal is opened/closed
+    if (!isOpen) {
+      setShowStatusList(false);
+      setRefreshStartTime(null);
+      setInitialLastChecked({});
     }
   }, [board, isOpen]);
 
@@ -46,6 +56,18 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
   };
 
   const handleRefresh = async () => {
+    setShowStatusList(true);
+    setRefreshStartTime(Date.now());
+
+    // Store the initial lastChecked values to compare against later
+    const initialValues: Record<string, string | null> = {};
+    if (boardItems) {
+      boardItems.forEach(item => {
+        initialValues[item.id] = item.lastChecked || null;
+      });
+    }
+    setInitialLastChecked(initialValues);
+
     await onRefresh(board.id);
   };
 
@@ -95,6 +117,46 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
             <p className="text-xs text-[#6c757d] text-center px-4">
               Cette action va récupérer les prix à jour pour tous les articles de ce tableau. Cela peut prendre quelques minutes.
             </p>
+            {showStatusList && (
+              <div className="mt-4 max-h-48 overflow-y-auto border border-gray-100 rounded-xl p-2 bg-white">
+                {boardItems.length === 0 ? (
+                  <p className="text-xs text-center text-gray-500 py-2">Aucun article dans ce tableau.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {boardItems.map((item) => {
+                      let statusText = 'En attente';
+                      let statusColor = 'text-gray-500 bg-gray-100';
+
+                      // Determine if the status is stale by comparing against the original lastChecked string
+                      const hasStartedRefresh = refreshStartTime !== null;
+                      const isStale = hasStartedRefresh && item.lastChecked === initialLastChecked[item.id];
+
+                      if (!isStale) {
+                        if (item.scrapeStatus === 'scraping') {
+                          statusText = 'En cours...';
+                          statusColor = 'text-blue-600 bg-blue-50';
+                        } else if (item.scrapeStatus === 'success') {
+                          statusText = 'Succès';
+                          statusColor = 'text-green-600 bg-green-50';
+                        } else if (item.scrapeStatus === 'error') {
+                          statusText = 'Erreur';
+                          statusColor = 'text-red-600 bg-red-50';
+                        }
+                      }
+
+                      return (
+                        <li key={item.id} className="flex justify-between items-center text-xs p-2 rounded hover:bg-gray-50">
+                          <span className="truncate pr-2 font-medium text-[#495057]" title={item.name}>{item.name}</span>
+                          <span className={`px-2 py-1 rounded-md whitespace-nowrap ${statusColor}`}>
+                            {statusText}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between pt-4 border-t border-gray-100">

@@ -268,8 +268,8 @@ export function Dashboard() {
 
       if (data.success) {
         showNotification(data.message || `Actualisation terminée. ${data.updatedCount || 0} prix mis à jour.`, 'success');
-        // Close modal on success if you want, or let user close it
-        setIsEditBoardModalOpen(false);
+        // We DO NOT close the modal here to let the user inspect the real-time visual tracking
+        // setIsEditBoardModalOpen(false);
       } else {
         showNotification(data.message || "Erreur lors de l'actualisation.", 'error');
       }
@@ -837,6 +837,11 @@ export function Dashboard() {
         onRefresh={handleRefreshBoardPrice}
         board={selectedBoardToEdit}
         isRefreshing={isBoardRefreshing}
+        boardItems={selectedBoardToEdit ? (
+          selectedBoardToEdit.id === 'all' ? items :
+          selectedBoardToEdit.id === 'favorites' ? items.filter(item => item.isFavorite) :
+          items.filter(item => item.boards?.includes(selectedBoardToEdit.id))
+        ) : []}
       />
     </div>
     </DndContext>
