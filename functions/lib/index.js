@@ -274,12 +274,18 @@ exports.refreshBoardItemsPrice = functions
                     if (itemData.userId !== context.auth?.uid && itemData.isPrivate) {
                         return;
                     }
+                    // Set scrapeStatus to 'scraping' right before attempting to scrape
+                    await doc.ref.update({
+                        scrapeStatus: 'scraping',
+                        lastChecked: new Date().toISOString()
+                    });
                     const oldPrice = itemData.currentPrice;
                     const { price: newPrice, error: scrapeError } = await scrapePrice(itemData.url, browser || undefined);
                     const updateData = {
                         lastChecked: new Date().toISOString()
                     };
                     if (newPrice !== null) {
+                        updateData.scrapeStatus = 'success';
                         if (newPrice !== oldPrice) {
                             const today = new Date().toISOString().split('T')[0];
                             let history = itemData.history || [];
@@ -300,6 +306,7 @@ exports.refreshBoardItemsPrice = functions
                     }
                     else {
                         // Scraping failed
+                        updateData.scrapeStatus = 'error';
                         updateData.lastScrapeError = scrapeError || "Erreur inconnue lors du scraping";
                     }
                     // Clean up old scrapeError field if it exists
@@ -307,6 +314,10 @@ exports.refreshBoardItemsPrice = functions
                     await doc.ref.update(updateData);
                 }
                 catch (err) {
+                    await doc.ref.update({
+                        scrapeStatus: 'error',
+                        lastScrapeError: err instanceof Error ? err.message : "Erreur inattendue"
+                    });
                     console.error(`Error processing doc ${doc.id} in board scrape:`, err);
                 }
             });
