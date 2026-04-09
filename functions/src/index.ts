@@ -7,8 +7,11 @@ import { Resend } from 'resend';
 admin.initializeApp();
 const db = admin.firestore();
 
+// Helper to sleep for a given number of milliseconds
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Helper to scrape a single URL
-async function scrapePrice(url: string, existingBrowser?: Browser): Promise<number | null> {
+async function scrapePrice(url: string, existingBrowser?: Browser): Promise<{ price: number | null, error: string | null }> {
   let browser = existingBrowser || null;
   let page = null;
   let ownBrowser = !existingBrowser; // Keep track of whether we launched it
@@ -38,7 +41,18 @@ async function scrapePrice(url: string, existingBrowser?: Browser): Promise<numb
 
     // Simulate mobile/desktop to avoid simple bot blocks
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36');
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+
+    try {
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      if (response && response.status() === 403) {
+        return { price: null, error: "Protection anti-bot ou accès refusé (Erreur 403)" };
+      }
+    } catch (gotoError: any) {
+      if (gotoError.message && gotoError.message.includes('Timeout')) {
+        return { price: null, error: "Délai d'attente dépassé (timeout)" };
+      }
+      throw gotoError;
+    }
 
     // 1. Try to extract from JSON-LD
     const jsonLdData = await page.evaluate(() => {
@@ -88,7 +102,7 @@ async function scrapePrice(url: string, existingBrowser?: Browser): Promise<numb
       return null;
     });
 
-    if (jsonLdData) return jsonLdData;
+    if (jsonLdData) return { price: jsonLdData, error: null };
 
     // 2. Fallback to common CSS selectors if JSON-LD fails
     const priceText = await page.evaluate(() => {
@@ -120,13 +134,16 @@ async function scrapePrice(url: string, existingBrowser?: Browser): Promise<numb
       // Clean string to extract number (e.g., "1 299,00 €" -> 1299.00)
       const cleaned = priceText.replace(/[^0-9,.]/g, '').replace(',', '.');
       const parsed = parseFloat(cleaned);
-      if (!isNaN(parsed)) return parsed;
+      if (!isNaN(parsed)) return { price: parsed, error: null };
     }
 
-    return null;
-  } catch (error) {
+    return { price: null, error: "Sélecteur de prix introuvable sur la page" };
+  } catch (error: any) {
     console.error(`Error scraping ${url}:`, error);
-    return null;
+    if (error.message && error.message.includes('Timeout')) {
+      return { price: null, error: "Délai d'attente dépassé (timeout)" };
+    }
+    return { price: null, error: "Erreur technique lors du chargement de la page" };
   } finally {
     if (page !== null) {
       await page.close().catch(() => {});
@@ -213,14 +230,20 @@ export const refreshBoardItemsPrice = functions
       throw new functions.https.HttpsError('internal', 'Failed to launch scraping browser.');
     }
 
-    const CONCURRENCY = 4; // Process up to 4 pages concurrently
+    const CONCURRENCY = 3; // Process up to 3 pages concurrently
     let updatedCount = 0;
 
     try {
       for (let i = 0; i < docs.length; i += CONCURRENCY) {
         const batch = docs.slice(i, i + CONCURRENCY);
 
-        const batchPromises = batch.map(async (doc) => {
+        const batchPromises = batch.map(async (doc, index) => {
+          // Jitter: random delay between 2 and 4 seconds between starts
+          if (index > 0) {
+             const jitter = Math.floor(Math.random() * (4000 - 2000 + 1) + 2000);
+             await sleep(jitter * index);
+          }
+
           try {
             const itemData = doc.data();
 
@@ -230,7 +253,7 @@ export const refreshBoardItemsPrice = functions
             }
 
             const oldPrice = itemData.currentPrice;
-            const newPrice = await scrapePrice(itemData.url, browser || undefined);
+            const { price: newPrice, error: scrapeError } = await scrapePrice(itemData.url, browser || undefined);
 
             const updateData: any = {
               lastChecked: new Date().toISOString()
@@ -248,21 +271,18 @@ export const refreshBoardItemsPrice = functions
 
                 updateData.currentPrice = newPrice;
                 updateData.history = history;
-                updateData.scrapeError = admin.firestore.FieldValue.delete();
+                updateData.lastScrapeError = admin.firestore.FieldValue.delete();
                 updatedCount++;
               } else {
-                updateData.scrapeError = admin.firestore.FieldValue.delete();
+                updateData.lastScrapeError = admin.firestore.FieldValue.delete();
               }
             } else {
               // Scraping failed
-              if (itemData.url && itemData.url.toLowerCase().includes('amazon.')) {
-                 updateData.scrapeError = "Impossible de récupérer le prix sur Amazon en raison de leurs protections anti-bots.";
-              } else if (itemData.url && itemData.url.toLowerCase().includes('maisonsdumonde.')) {
-                 updateData.scrapeError = "Impossible de récupérer le prix sur Maisons du Monde en raison de leurs protections anti-bots.";
-              } else {
-                 updateData.scrapeError = "Impossible de récupérer le prix sur ce site.";
-              }
+              updateData.lastScrapeError = scrapeError || "Erreur inconnue lors du scraping";
             }
+
+            // Clean up old scrapeError field if it exists
+            updateData.scrapeError = admin.firestore.FieldValue.delete();
 
             await doc.ref.update(updateData);
           } catch (err) {
@@ -307,7 +327,7 @@ export const refreshItemPrice = functions
         throw new functions.https.HttpsError('permission-denied', 'Cannot refresh private item.');
     }
 
-    const newPrice = await scrapePrice(itemData?.url);
+    const { price: newPrice, error: scrapeError } = await scrapePrice(itemData?.url);
 
     if (newPrice !== null && newPrice !== itemData?.currentPrice) {
       const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
@@ -326,6 +346,7 @@ export const refreshItemPrice = functions
         history: history,
         lastChecked: new Date().toISOString(),
         isScraping: false,
+        lastScrapeError: admin.firestore.FieldValue.delete(),
         scrapeError: admin.firestore.FieldValue.delete()
       });
 
@@ -334,23 +355,18 @@ export const refreshItemPrice = functions
       // Just update the last check time, and handle potential failure
       const updateData: any = {
         lastChecked: new Date().toISOString(),
-        isScraping: false
+        isScraping: false,
+        scrapeError: admin.firestore.FieldValue.delete()
       };
 
       if (newPrice === null) {
-        if (itemData?.url && itemData.url.toLowerCase().includes('amazon.')) {
-           updateData.scrapeError = "Impossible de récupérer le prix sur Amazon en raison de leurs protections anti-bots.";
-        } else if (itemData?.url && itemData.url.toLowerCase().includes('maisonsdumonde.')) {
-           updateData.scrapeError = "Impossible de récupérer le prix sur Maisons du Monde en raison de leurs protections anti-bots.";
-        } else {
-           updateData.scrapeError = "Impossible de récupérer le prix sur ce site.";
-        }
+        updateData.lastScrapeError = scrapeError || "Erreur inconnue lors du scraping";
       } else {
-        updateData.scrapeError = admin.firestore.FieldValue.delete();
+        updateData.lastScrapeError = admin.firestore.FieldValue.delete();
       }
 
       await itemRef.update(updateData);
-      return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice, scrapeError: updateData.scrapeError };
+      return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice, lastScrapeError: updateData.lastScrapeError };
     }
 });
 
@@ -389,16 +405,27 @@ export const nightlyScrape = functions
       return null;
     }
 
-    const CONCURRENCY = 4; // Process up to 4 pages concurrently
+    const CONCURRENCY = 3; // Process up to 3 pages concurrently
 
     for (let i = 0; i < docs.length; i += CONCURRENCY) {
       const batch = docs.slice(i, i + CONCURRENCY);
 
-      const batchPromises = batch.map(async (doc) => {
+      const batchPromises = batch.map(async (doc, index) => {
+        // Jitter: random delay between 2 and 4 seconds between starts
+        if (index > 0) {
+           const jitter = Math.floor(Math.random() * (4000 - 2000 + 1) + 2000);
+           await sleep(jitter * index);
+        }
+
         try {
           const itemData = doc.data();
           const oldPrice = itemData.currentPrice;
-          const newPrice = await scrapePrice(itemData.url, browser || undefined);
+          const { price: newPrice, error: scrapeError } = await scrapePrice(itemData.url, browser || undefined);
+
+          const updateData: any = {
+            lastChecked: new Date().toISOString(),
+            scrapeError: admin.firestore.FieldValue.delete()
+          };
 
           if (newPrice !== null) {
             if (newPrice !== oldPrice) {
@@ -419,17 +446,17 @@ export const nightlyScrape = functions
                  history.push({ date: today, price: newPrice });
               }
 
-              await doc.ref.update({
-                currentPrice: newPrice,
-                history: history,
-                lastChecked: new Date().toISOString()
-              });
+              updateData.currentPrice = newPrice;
+              updateData.history = history;
+              updateData.lastScrapeError = admin.firestore.FieldValue.delete();
             } else {
-              await doc.ref.update({
-                lastChecked: new Date().toISOString()
-              });
+              updateData.lastScrapeError = admin.firestore.FieldValue.delete();
             }
+          } else {
+            updateData.lastScrapeError = scrapeError || "Erreur inconnue lors du scraping";
           }
+
+          await doc.ref.update(updateData);
         } catch (err) {
           console.error(`Error processing doc ${doc.id}:`, err);
         }

@@ -100,13 +100,13 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                    <p className="text-sm font-medium text-[#6c757d] uppercase tracking-wider mb-2">{item.boards.join(', ')}</p>
                 )}
 
-                {item.scrapeError ? (
+                {item.lastScrapeError ? (
                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
                      <div className="flex items-start">
                        <AlertTriangle className="w-5 h-5 text-amber-500 mr-3 shrink-0 mt-0.5" />
                        <div>
                          <h4 className="text-sm font-semibold text-amber-800">Erreur lors de la récupération du prix</h4>
-                         <p className="text-sm text-amber-700 mt-1">{item.scrapeError}</p>
+                         <p className="text-sm text-amber-700 mt-1">{item.lastScrapeError}</p>
                        </div>
                      </div>
                    </div>

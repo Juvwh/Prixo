@@ -21,13 +21,13 @@ interface ItemCardProps {
   isFavorite: boolean;
   history: PriceHistory[];
   isScraping?: boolean;
-  scrapeError?: string;
+  lastScrapeError?: string;
   isSelected?: boolean;
   isSelectionModeActive?: boolean;
   onClick: () => void;
 }
 
-export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPrivate, isFavorite, history, isScraping, scrapeError, isSelected, isSelectionModeActive, onClick }: ItemCardProps) {
+export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPrivate, isFavorite, history, isScraping, lastScrapeError, isSelected, isSelectionModeActive, onClick }: ItemCardProps) {
   const {
     attributes,
     listeners,
@@ -39,7 +39,7 @@ export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPriv
     id: id,
     data: {
       type: 'item',
-      item: { id, name, boards, currentPrice, imageUrl, url, isPrivate, isFavorite, history, isScraping, scrapeError }
+      item: { id, name, boards, currentPrice, imageUrl, url, isPrivate, isFavorite, history, isScraping, lastScrapeError }
     }
   });
 
@@ -117,8 +117,8 @@ export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPriv
           <div>
             {isScraping ? (
               <p className="text-sm text-[#6c757d] animate-pulse">Recherche en cours...</p>
-            ) : scrapeError ? (
-              <div className="flex items-center text-amber-500" title={scrapeError}>
+            ) : lastScrapeError ? (
+              <div className="flex items-center text-amber-500" title={lastScrapeError}>
                 <AlertTriangle className="w-6 h-6 mr-2" />
                 <span className="text-sm font-medium">Erreur de prix</span>
               </div>

@@ -203,7 +203,7 @@ export function Dashboard() {
             currentPrice: data.newPrice !== undefined ? data.newPrice : prev.currentPrice,
             lastChecked: new Date().toISOString(),
             isScraping: false,
-            scrapeError: data.scrapeError || (data.newPrice === null ? "Impossible de récupérer le prix sur ce site." : null)
+            lastScrapeError: data.lastScrapeError || (data.newPrice === null ? "Impossible de récupérer le prix sur ce site." : null)
           };
         }
         return prev;
