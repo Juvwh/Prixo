@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, PlusSquare, LogOut, Heart, Menu, Lock } from 'lucide-react';
+import { Home, PlusSquare, LogOut, Heart, Menu, Lock, Settings } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useDroppable } from '@dnd-kit/core';
 
@@ -13,6 +13,7 @@ export interface BoardData {
 interface SidebarProps {
   onAddClick: () => void;
   onAddBoardClick: () => void;
+  onEditBoardClick: (board: BoardData) => void;
   onLogout: () => void;
   className?: string;
   boards: BoardData[];
@@ -21,7 +22,7 @@ interface SidebarProps {
   userEmail?: string | null;
 }
 
-export function Sidebar({ onAddClick, onAddBoardClick, onLogout, className, boards, selectedBoardId, onSelectBoard, userEmail }: SidebarProps) {
+export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogout, className, boards, selectedBoardId, onSelectBoard, userEmail }: SidebarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   return (
@@ -99,6 +100,7 @@ export function Sidebar({ onAddClick, onAddBoardClick, onLogout, className, boar
                 board={board}
                 selectedBoardId={selectedBoardId}
                 onClick={() => { onSelectBoard(board.id); setIsMobileMenuOpen(false); }}
+                onEditClick={() => onEditBoardClick(board)}
               />
             ))
           )}
@@ -118,6 +120,7 @@ export function Sidebar({ onAddClick, onAddBoardClick, onLogout, className, boar
                 board={board}
                 selectedBoardId={selectedBoardId}
                 onClick={() => { onSelectBoard(board.id); setIsMobileMenuOpen(false); }}
+                onEditClick={() => onEditBoardClick(board)}
               />
             ))
           )}
@@ -166,7 +169,7 @@ export function Sidebar({ onAddClick, onAddBoardClick, onLogout, className, boar
 }
 
 // Wrapper for Droppable board
-function DroppableBoard({ board, selectedBoardId, onClick }: { board: BoardData, selectedBoardId: string | null, onClick: () => void }) {
+function DroppableBoard({ board, selectedBoardId, onClick, onEditClick }: { board: BoardData, selectedBoardId: string | null, onClick: () => void, onEditClick: () => void }) {
   const { isOver, setNodeRef } = useDroppable({
     id: board.id,
     data: {
@@ -176,19 +179,32 @@ function DroppableBoard({ board, selectedBoardId, onClick }: { board: BoardData,
   });
 
   return (
-    <button
+    <div
       ref={setNodeRef}
-      onClick={onClick}
       className={cn(
-        "flex items-center justify-between w-full px-4 py-2.5 text-sm font-medium rounded-xl transition-colors",
+        "group flex items-center justify-between w-full px-4 py-2.5 text-sm font-medium rounded-xl transition-colors cursor-pointer",
         selectedBoardId === board.id
           ? "text-[#212529] bg-[#eef2f0]"
           : "text-[#6c757d] hover:bg-[#eef2f0]/50",
         isOver && "ring-2 ring-[#a8d5ba] bg-[#eef2f0]" // Visual feedback when dragging over
       )}
+      onClick={onClick}
     >
-      <span className="truncate">{board.name}</span>
-      {board.isPrivate && <Lock className="w-3.5 h-3.5 ml-2 shrink-0 opacity-50" />}
-    </button>
+      <div className="flex items-center min-w-0 flex-1">
+        <span className="truncate">{board.name}</span>
+        {board.isPrivate && <Lock className="w-3.5 h-3.5 ml-2 shrink-0 opacity-50" />}
+      </div>
+
+      <button
+        onClick={(e) => {
+          e.stopPropagation(); // Prevent board selection when clicking settings
+          onEditClick();
+        }}
+        className="ml-2 p-1 text-[#adb5bd] opacity-0 group-hover:opacity-100 hover:text-[#212529] transition-all rounded-md hover:bg-black/5"
+        title="Modifier le tableau"
+      >
+        <Settings className="w-4 h-4" />
+      </button>
+    </div>
   );
 }

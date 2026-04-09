@@ -5,6 +5,8 @@ import { AddItemModal } from '../components/AddItemModal';
 import { EditItemModal } from '../components/EditItemModal';
 import { ItemDetailModal } from '../components/ItemDetailModal';
 import { AddBoardModal } from '../components/AddBoardModal';
+import { EditBoardModal } from '../components/EditBoardModal';
+import { BoardData } from '../components/Sidebar';
 import Masonry from 'react-masonry-css';
 import { auth, db, functions } from '../firebase/config';
 import { signOut } from 'firebase/auth';
@@ -33,6 +35,9 @@ export function Dashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAddBoardModalOpen, setIsAddBoardModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isEditBoardModalOpen, setIsEditBoardModalOpen] = useState(false);
+  const [selectedBoardToEdit, setSelectedBoardToEdit] = useState<BoardData | null>(null);
+  const [isBoardRefreshing, setIsBoardRefreshing] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [items, setItems] = useState<any[]>([]);
   const [boardsData, setBoardsData] = useState<any[]>([]);
@@ -219,30 +224,60 @@ export function Dashboard() {
     }
   };
 
-  const handleDeleteBoard = async () => {
-    if (!selectedBoardId || selectedBoardId === 'favorites') return;
+  const handleDeleteBoard = async (boardId: string) => {
+    try {
+      // 1. Delete the board document
+      await deleteDoc(doc(db, 'boards', boardId));
 
-    if (window.confirm("Êtes-vous sûr de vouloir supprimer ce tableau ?")) {
-      try {
-        // 1. Delete the board document
-        await deleteDoc(doc(db, 'boards', selectedBoardId));
+      // 2. Remove this board from all items that have it
+      const itemsToUpdate = items.filter(item => item.boards && item.boards.includes(boardId));
 
-        // 2. Remove this board from all items that have it
-        // We find all items that include this board in their 'boards' array
-        const itemsToUpdate = items.filter(item => item.boards && item.boards.includes(selectedBoardId));
-
-        for (const item of itemsToUpdate) {
-          const newBoards = item.boards.filter((bId: string) => bId !== selectedBoardId);
-          await updateDoc(doc(db, 'items', item.id), { boards: newBoards });
-        }
-
-        // 3. Reset selection and show notification
-        setSelectedBoardId(null);
-        showNotification("Tableau supprimé avec succès.", 'success');
-      } catch (error) {
-        console.error("Error deleting board: ", error);
-        showNotification("Erreur lors de la suppression du tableau.", 'error');
+      for (const item of itemsToUpdate) {
+        const newBoards = item.boards.filter((bId: string) => bId !== boardId);
+        await updateDoc(doc(db, 'items', item.id), { boards: newBoards });
       }
+
+      // 3. Reset selection if the deleted board was selected
+      if (selectedBoardId === boardId) {
+        setSelectedBoardId(null);
+      }
+      showNotification("Tableau supprimé avec succès.", 'success');
+    } catch (error) {
+      console.error("Error deleting board: ", error);
+      showNotification("Erreur lors de la suppression du tableau.", 'error');
+    }
+  };
+
+  const handleEditBoard = async (boardId: string, data: { name: string }) => {
+    try {
+      await updateDoc(doc(db, 'boards', boardId), data);
+      showNotification("Tableau mis à jour.", 'success');
+    } catch (error) {
+      console.error("Error updating board: ", error);
+      showNotification("Erreur lors de la mise à jour.", 'error');
+    }
+  };
+
+  const handleRefreshBoardPrice = async (boardId: string) => {
+    setIsBoardRefreshing(true);
+    setNotification(null);
+    try {
+      const refreshBoardItemsPrice = httpsCallable(functions, 'refreshBoardItemsPrice');
+      const result = await refreshBoardItemsPrice({ boardId });
+      const data = result.data as any;
+
+      if (data.success) {
+        showNotification(data.message || `Actualisation terminée. ${data.updatedCount || 0} prix mis à jour.`, 'success');
+        // Close modal on success if you want, or let user close it
+        setIsEditBoardModalOpen(false);
+      } else {
+        showNotification(data.message || "Erreur lors de l'actualisation.", 'error');
+      }
+    } catch (error) {
+      console.error("Error refreshing board: ", error);
+      showNotification("Erreur lors de l'actualisation du tableau.", 'error');
+    } finally {
+      setIsBoardRefreshing(false);
     }
   };
 
@@ -545,6 +580,10 @@ export function Dashboard() {
       <Sidebar
         onAddClick={() => setIsAddModalOpen(true)}
         onAddBoardClick={() => setIsAddBoardModalOpen(true)}
+        onEditBoardClick={(board) => {
+          setSelectedBoardToEdit(board);
+          setIsEditBoardModalOpen(true);
+        }}
         onLogout={handleLogout}
         boards={boardsData}
         selectedBoardId={selectedBoardId}
@@ -557,15 +596,6 @@ export function Dashboard() {
           <header className="mb-8">
             <div className="flex items-center gap-4 mb-2">
               <h2 className="text-3xl font-bold text-[#212529] tracking-tight">{getPageTitle()}</h2>
-              {selectedBoardId && selectedBoardId !== 'favorites' && (
-                <button
-                  onClick={handleDeleteBoard}
-                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                  title="Supprimer le tableau"
-                >
-                  <Trash2 size={20} />
-                </button>
-              )}
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -797,6 +827,16 @@ export function Dashboard() {
         isOpen={isAddBoardModalOpen}
         onClose={() => setIsAddBoardModalOpen(false)}
         onSubmit={handleAddBoard}
+      />
+
+      <EditBoardModal
+        isOpen={isEditBoardModalOpen}
+        onClose={() => setIsEditBoardModalOpen(false)}
+        onSubmit={handleEditBoard}
+        onDelete={handleDeleteBoard}
+        onRefresh={handleRefreshBoardPrice}
+        board={selectedBoardToEdit}
+        isRefreshing={isBoardRefreshing}
       />
     </div>
     </DndContext>
