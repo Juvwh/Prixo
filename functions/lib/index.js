@@ -86,6 +86,22 @@ async function scrapePrice(url, existingBrowser) {
             }
             throw gotoError;
         }
+        // Check for redirection
+        const finalUrl = page.url();
+        if (finalUrl && finalUrl !== url && finalUrl !== 'about:blank') {
+            try {
+                const originalUrlObj = new URL(url);
+                const finalUrlObj = new URL(finalUrl);
+                const normalizePath = (p) => p.replace(/\/$/, '');
+                if (originalUrlObj.hostname.replace(/^www\./, '') !== finalUrlObj.hostname.replace(/^www\./, '') ||
+                    normalizePath(originalUrlObj.pathname) !== normalizePath(finalUrlObj.pathname)) {
+                    return { price: null, error: "Article introuvable" };
+                }
+            }
+            catch (e) {
+                // Ignore URL parsing errors and continue
+            }
+        }
         // 1. Try to extract from JSON-LD
         const jsonLdData = await page.evaluate(() => {
             const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));

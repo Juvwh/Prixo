@@ -100,21 +100,32 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                    <p className="text-sm font-medium text-[#6c757d] uppercase tracking-wider mb-2">{item.boards.join(', ')}</p>
                 )}
 
-                {item.lastScrapeError ? (
-                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
-                     <div className="flex items-start">
-                       <AlertTriangle className="w-5 h-5 text-amber-500 mr-3 shrink-0 mt-0.5" />
-                       <div>
-                         <h4 className="text-sm font-semibold text-amber-800">Erreur lors de la récupération du prix</h4>
-                         <p className="text-sm text-amber-700 mt-1">{item.lastScrapeError}</p>
+                <div className="flex flex-col space-y-4">
+                  <div className="flex items-baseline space-x-3">
+                    <p className={cn("text-4xl sm:text-5xl font-bold", item.lastScrapeError ? "text-[#adb5bd] line-through" : "text-[#212529]")}>
+                      {formattedPrice}
+                    </p>
+                  </div>
+
+                  {item.lastScrapeError && (
+                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                       <div className="flex items-start">
+                         <AlertTriangle className="w-5 h-5 text-amber-500 mr-3 shrink-0 mt-0.5" />
+                         <div>
+                           <h4 className="text-sm font-semibold text-amber-800">
+                             {item.lastScrapeError === "Article introuvable" ? "Article introuvable" : "Erreur lors de la récupération du prix"}
+                           </h4>
+                           {item.lastScrapeError !== "Article introuvable" && (
+                             <p className="text-sm text-amber-700 mt-1">{item.lastScrapeError}</p>
+                           )}
+                           {item.lastScrapeError === "Article introuvable" && (
+                             <p className="text-sm text-amber-700 mt-1">L'article semble avoir été retiré du site ou redirige vers une autre page (probablement en rupture de stock).</p>
+                           )}
+                         </div>
                        </div>
                      </div>
-                   </div>
-                ) : (
-                  <div className="flex items-baseline space-x-3">
-                    <p className="text-4xl sm:text-5xl font-bold text-[#212529]">{formattedPrice}</p>
-                  </div>
-                )}
+                  )}
+                </div>
                 <p className="text-sm text-[#6c757d] mt-2">Dernière vérification : {new Date(item.lastChecked).toLocaleDateString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
               </div>
 
