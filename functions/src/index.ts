@@ -238,17 +238,21 @@ export const refreshBoardItemsPrice = functions
         const batch = docs.slice(i, i + CONCURRENCY);
 
         const batchPromises = batch.map(async (doc, index) => {
-          // Jitter: random delay between 2 and 4 seconds between starts
-          if (index > 0) {
-             const jitter = Math.floor(Math.random() * (4000 - 2000 + 1) + 2000);
-             await sleep(jitter * index);
-          }
-
           try {
+            // Jitter: random delay between 2 and 4 seconds between starts
+            if (index > 0) {
+               const jitter = Math.floor(Math.random() * (4000 - 2000 + 1) + 2000);
+               await sleep(jitter * index);
+            }
+
             const itemData = doc.data();
 
             // Skip private items that don't belong to the user
             if (itemData.userId !== context.auth?.uid && itemData.isPrivate) {
+                await doc.ref.update({
+                  scrapeStatus: 'error',
+                  lastScrapeError: "Non autorisé : article privé appartenant à un autre utilisateur"
+                });
                 return;
             }
 
@@ -294,15 +298,19 @@ export const refreshBoardItemsPrice = functions
 
             await doc.ref.update(updateData);
           } catch (err) {
-            await doc.ref.update({
-              scrapeStatus: 'error',
-              lastScrapeError: err instanceof Error ? err.message : "Erreur inattendue"
-            });
+            try {
+              await doc.ref.update({
+                scrapeStatus: 'error',
+                lastScrapeError: err instanceof Error ? err.message : "Erreur inattendue"
+              });
+            } catch (updateErr) {
+              console.error(`Failed to update error state for doc ${doc.id}:`, updateErr);
+            }
             console.error(`Error processing doc ${doc.id} in board scrape:`, err);
           }
         });
 
-        await Promise.all(batchPromises);
+        await Promise.allSettled(batchPromises);
       }
     } finally {
       if (browser) {
