@@ -117,25 +117,31 @@ export function ItemCard({ id, name, boards, currentPrice, imageUrl, url, isPriv
           <div>
             {isScraping ? (
               <p className="text-sm text-[#6c757d] animate-pulse">Recherche en cours...</p>
-            ) : lastScrapeError ? (
-              <div className="flex items-center text-amber-500" title={lastScrapeError}>
-                <AlertTriangle className="w-6 h-6 mr-2" />
-                <span className="text-sm font-medium">Erreur de prix</span>
-              </div>
             ) : (
               <>
-                <p className="text-2xl font-bold text-[#212529]">{formattedPrice}</p>
-                {priceDropped && (
-                  <div className="flex items-center text-[#a8d5ba] mt-1 text-sm font-medium">
-                    <ArrowDownRight className="w-4 h-4 mr-1" />
-                    <span>Baisse de prix</span>
+                <p className={cn("text-2xl font-bold", lastScrapeError ? "text-[#adb5bd] line-through" : "text-[#212529]")}>
+                  {formattedPrice}
+                </p>
+                {lastScrapeError ? (
+                  <div className="flex items-center text-amber-500 mt-1" title={lastScrapeError}>
+                    <AlertTriangle className="w-4 h-4 mr-1" />
+                    <span className="text-sm font-medium">{lastScrapeError === "Article introuvable" ? "Article introuvable" : "Erreur de prix"}</span>
                   </div>
-                )}
-                {priceIncreased && (
-                  <div className="flex items-center text-red-400 mt-1 text-sm font-medium">
-                    <ArrowUpRight className="w-4 h-4 mr-1" />
-                    <span>Hausse de prix</span>
-                  </div>
+                ) : (
+                  <>
+                    {priceDropped && (
+                      <div className="flex items-center text-[#a8d5ba] mt-1 text-sm font-medium">
+                        <ArrowDownRight className="w-4 h-4 mr-1" />
+                        <span>Baisse de prix</span>
+                      </div>
+                    )}
+                    {priceIncreased && (
+                      <div className="flex items-center text-red-400 mt-1 text-sm font-medium">
+                        <ArrowUpRight className="w-4 h-4 mr-1" />
+                        <span>Hausse de prix</span>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
