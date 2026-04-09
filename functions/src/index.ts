@@ -137,6 +137,126 @@ async function scrapePrice(url: string, existingBrowser?: Browser): Promise<numb
   }
 }
 
+// Callable function to refresh all items in a board
+export const refreshBoardItemsPrice = functions
+  .region('europe-west1')
+  .runWith({ memory: '2GB', timeoutSeconds: 540 })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
+    }
+
+    const { boardId } = data;
+    if (!boardId) {
+      throw new functions.https.HttpsError('invalid-argument', 'Board ID is required.');
+    }
+
+    // Verify board existence and permissions
+    const boardRef = db.collection('boards').doc(boardId);
+    const boardSnap = await boardRef.get();
+
+    if (!boardSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Board not found.');
+    }
+
+    const boardData = boardSnap.data();
+    if (boardData?.isPrivate && boardData?.ownerId !== context.auth.uid) {
+        throw new functions.https.HttpsError('permission-denied', 'Cannot access private board.');
+    }
+
+    // Get all items associated with this board
+    const itemsSnapshot = await db.collection('items')
+      .where('boards', 'array-contains', boardId)
+      .get();
+
+    const docs = itemsSnapshot.docs;
+
+    if (docs.length === 0) {
+      return { success: true, message: 'Aucun article dans ce tableau.', updatedCount: 0 };
+    }
+
+    // Launch a single browser instance for the entire batch
+    let browser: Browser | null = null;
+    try {
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: { width: 1920, height: 1080 } as any,
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      });
+    } catch (err) {
+      console.error("Failed to launch browser for refreshBoardItemsPrice:", err);
+      throw new functions.https.HttpsError('internal', 'Failed to launch scraping browser.');
+    }
+
+    const CONCURRENCY = 4; // Process up to 4 pages concurrently
+    let updatedCount = 0;
+
+    try {
+      for (let i = 0; i < docs.length; i += CONCURRENCY) {
+        const batch = docs.slice(i, i + CONCURRENCY);
+
+        const batchPromises = batch.map(async (doc) => {
+          try {
+            const itemData = doc.data();
+
+            // Skip private items that don't belong to the user
+            if (itemData.userId !== context.auth?.uid && itemData.isPrivate) {
+                return;
+            }
+
+            const oldPrice = itemData.currentPrice;
+            const newPrice = await scrapePrice(itemData.url, browser || undefined);
+
+            const updateData: any = {
+              lastChecked: new Date().toISOString()
+            };
+
+            if (newPrice !== null) {
+              if (newPrice !== oldPrice) {
+                const today = new Date().toISOString().split('T')[0];
+                let history = itemData.history || [];
+                if (history.length > 0 && history[history.length - 1].date === today) {
+                   history[history.length - 1] = { date: today, price: newPrice };
+                } else {
+                   history.push({ date: today, price: newPrice });
+                }
+
+                updateData.currentPrice = newPrice;
+                updateData.history = history;
+                updateData.scrapeError = admin.firestore.FieldValue.delete();
+                updatedCount++;
+              } else {
+                updateData.scrapeError = admin.firestore.FieldValue.delete();
+              }
+            } else {
+              // Scraping failed
+              if (itemData.url && itemData.url.toLowerCase().includes('amazon.')) {
+                 updateData.scrapeError = "Impossible de récupérer le prix sur Amazon en raison de leurs protections anti-bots.";
+              } else if (itemData.url && itemData.url.toLowerCase().includes('maisonsdumonde.')) {
+                 updateData.scrapeError = "Impossible de récupérer le prix sur Maisons du Monde en raison de leurs protections anti-bots.";
+              } else {
+                 updateData.scrapeError = "Impossible de récupérer le prix sur ce site.";
+              }
+            }
+
+            await doc.ref.update(updateData);
+          } catch (err) {
+            console.error(`Error processing doc ${doc.id} in board scrape:`, err);
+          }
+        });
+
+        await Promise.all(batchPromises);
+      }
+    } finally {
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+    }
+
+    return { success: true, message: `Mise à jour terminée. ${updatedCount} prix modifiés sur ${docs.length} articles.`, updatedCount };
+});
+
 // Callable function to refresh a single item (triggered from UI)
 export const refreshItemPrice = functions
   .region('europe-west1')
