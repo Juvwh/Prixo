@@ -8,6 +8,7 @@ export interface BoardData {
   name: string;
   isPrivate: boolean;
   ownerId?: string;
+  isSpecial?: boolean; // Indique un tableau "Tous les articles" ou "Coups de cœur"
 }
 
 interface SidebarProps {
@@ -54,31 +55,55 @@ export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogou
         </div>
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-          <button
-            onClick={() => { onSelectBoard(null); setIsMobileMenuOpen(false); }}
+          <div
             className={cn(
-              "flex items-center w-full px-4 py-3 text-sm font-medium rounded-xl transition-colors",
+              "group flex items-center justify-between w-full px-4 py-3 text-sm font-medium rounded-xl transition-colors cursor-pointer",
               selectedBoardId === null
                 ? "text-[#212529] bg-[#eef2f0]"
                 : "text-[#6c757d] hover:bg-[#eef2f0]/50"
             )}
+            onClick={() => { onSelectBoard(null); setIsMobileMenuOpen(false); }}
           >
-            <Home className="w-5 h-5 mr-3" />
-            Tous les articles
-          </button>
+            <div className="flex items-center">
+              <Home className="w-5 h-5 mr-3" />
+              Tous les articles
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditBoardClick({ id: 'all', name: 'Tous les articles', isPrivate: false, isSpecial: true });
+              }}
+              className="ml-2 p-1 text-[#adb5bd] opacity-0 group-hover:opacity-100 hover:text-[#212529] transition-all rounded-md hover:bg-black/5"
+              title="Options"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
 
-          <button
-            onClick={() => { onSelectBoard('favorites'); setIsMobileMenuOpen(false); }}
+          <div
             className={cn(
-              "flex items-center w-full px-4 py-3 text-sm font-medium rounded-xl transition-colors",
+              "group flex items-center justify-between w-full px-4 py-3 text-sm font-medium rounded-xl transition-colors cursor-pointer",
               selectedBoardId === 'favorites'
                 ? "text-[#212529] bg-[#eef2f0]"
                 : "text-[#6c757d] hover:bg-[#eef2f0]/50"
             )}
+            onClick={() => { onSelectBoard('favorites'); setIsMobileMenuOpen(false); }}
           >
-            <Heart className="w-5 h-5 mr-3" />
-            Coups de cœur
-          </button>
+            <div className="flex items-center">
+              <Heart className="w-5 h-5 mr-3" />
+              Coups de cœur
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditBoardClick({ id: 'favorites', name: 'Coups de cœur', isPrivate: false, isSpecial: true });
+              }}
+              className="ml-2 p-1 text-[#adb5bd] opacity-0 group-hover:opacity-100 hover:text-[#212529] transition-all rounded-md hover:bg-black/5"
+              title="Options"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
 
           <div className="pt-6 pb-2 flex items-center justify-between px-4">
             <p className="text-xs font-semibold text-[#adb5bd] uppercase tracking-wider">Tableaux Partagés</p>

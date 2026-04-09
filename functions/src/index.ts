@@ -151,23 +151,47 @@ export const refreshBoardItemsPrice = functions
       throw new functions.https.HttpsError('invalid-argument', 'Board ID is required.');
     }
 
-    // Verify board existence and permissions
-    const boardRef = db.collection('boards').doc(boardId);
-    const boardSnap = await boardRef.get();
+    let itemsSnapshot;
 
-    if (!boardSnap.exists) {
-      throw new functions.https.HttpsError('not-found', 'Board not found.');
+    if (boardId === 'all') {
+      // Get all items accessible to the user (their own items + public items)
+      // Since scraping takes time and we only want to scrape what's relevant to the user's dashboard,
+      // it's safer and more performant to only refresh the user's OWN items, or items they have access to.
+      // But scraping someone else's public item from User A's session might be unwanted side effect.
+      // To match the frontend "Tous les articles" logic which queries for:
+      // (isPrivate == false) OR (userId == user.uid)
+      // Since Admin SDK bypasses rules, we must explicitly query.
+      // Firestore doesn't easily support OR queries in Node.js SDK without multiple queries.
+      // Simplest robust solution: only scrape the user's OWN items when doing a global refresh
+      // to avoid scraping the entire global database of public items.
+      itemsSnapshot = await db.collection('items')
+        .where('userId', '==', context.auth.uid)
+        .get();
+    } else if (boardId === 'favorites') {
+      // Get all favorite items belonging to the user
+      itemsSnapshot = await db.collection('items')
+        .where('userId', '==', context.auth.uid)
+        .where('isFavorite', '==', true)
+        .get();
+    } else {
+      // Verify board existence and permissions for standard boards
+      const boardRef = db.collection('boards').doc(boardId);
+      const boardSnap = await boardRef.get();
+
+      if (!boardSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Board not found.');
+      }
+
+      const boardData = boardSnap.data();
+      if (boardData?.isPrivate && boardData?.ownerId !== context.auth.uid) {
+          throw new functions.https.HttpsError('permission-denied', 'Cannot access private board.');
+      }
+
+      // Get all items associated with this specific board
+      itemsSnapshot = await db.collection('items')
+        .where('boards', 'array-contains', boardId)
+        .get();
     }
-
-    const boardData = boardSnap.data();
-    if (boardData?.isPrivate && boardData?.ownerId !== context.auth.uid) {
-        throw new functions.https.HttpsError('permission-denied', 'Cannot access private board.');
-    }
-
-    // Get all items associated with this board
-    const itemsSnapshot = await db.collection('items')
-      .where('boards', 'array-contains', boardId)
-      .get();
 
     const docs = itemsSnapshot.docs;
 
