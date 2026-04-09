@@ -219,17 +219,10 @@ exports.refreshBoardItemsPrice = functions
     let itemsSnapshot;
     if (boardId === 'all') {
         // Get all items accessible to the user (their own items + public items)
-        // Since scraping takes time and we only want to scrape what's relevant to the user's dashboard,
-        // it's safer and more performant to only refresh the user's OWN items, or items they have access to.
-        // But scraping someone else's public item from User A's session might be unwanted side effect.
-        // To match the frontend "Tous les articles" logic which queries for:
-        // (isPrivate == false) OR (userId == user.uid)
-        // Since Admin SDK bypasses rules, we must explicitly query.
-        // Firestore doesn't easily support OR queries in Node.js SDK without multiple queries.
-        // Simplest robust solution: only scrape the user's OWN items when doing a global refresh
-        // to avoid scraping the entire global database of public items.
+        // Since this application is intended for a very small number of users,
+        // we can safely scrape all public items + the user's own items.
         itemsSnapshot = await db.collection('items')
-            .where('userId', '==', context.auth.uid)
+            .where(admin.firestore.Filter.or(admin.firestore.Filter.where('isPrivate', '==', false), admin.firestore.Filter.where('userId', '==', context.auth.uid)))
             .get();
     }
     else if (boardId === 'favorites') {
