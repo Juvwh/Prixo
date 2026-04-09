@@ -378,7 +378,10 @@ export const refreshItemPrice = functions
       }
 
       await itemRef.update(updateData);
-      return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice, lastScrapeError: updateData.lastScrapeError };
+
+      // Do not return FieldValue.delete() to the client
+      const returnError = newPrice === null ? updateData.lastScrapeError : null;
+      return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice, lastScrapeError: returnError };
     }
 });
 

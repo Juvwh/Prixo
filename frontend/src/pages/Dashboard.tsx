@@ -198,12 +198,19 @@ export function Dashboard() {
       // Mettre à jour l'élément sélectionné avec les nouvelles données
       setSelectedItem((prev: any) => {
         if (prev && prev.id === id) {
+          let errorMsg = null;
+          if (typeof data.lastScrapeError === 'string') {
+             errorMsg = data.lastScrapeError;
+          } else if (data.newPrice === null) {
+             errorMsg = "Impossible de récupérer le prix sur ce site.";
+          }
+
           return {
             ...prev,
             currentPrice: data.newPrice !== undefined ? data.newPrice : prev.currentPrice,
             lastChecked: new Date().toISOString(),
             isScraping: false,
-            lastScrapeError: data.lastScrapeError || (data.newPrice === null ? "Impossible de récupérer le prix sur ce site." : null)
+            lastScrapeError: errorMsg
           };
         }
         return prev;
