@@ -45,19 +45,34 @@ const resend_1 = require("resend");
 admin.initializeApp();
 const db = admin.firestore();
 // Helper to scrape a single URL
-async function scrapePrice(url) {
-    let browser = null;
+async function scrapePrice(url, existingBrowser) {
+    let browser = existingBrowser || null;
+    let page = null;
+    let ownBrowser = !existingBrowser; // Keep track of whether we launched it
     try {
-        browser = await puppeteer_core_1.default.launch({
-            args: chromium_1.default.args,
-            defaultViewport: { width: 1920, height: 1080 },
-            executablePath: await chromium_1.default.executablePath(),
-            headless: true,
+        if (!browser) {
+            browser = await puppeteer_core_1.default.launch({
+                args: chromium_1.default.args,
+                defaultViewport: { width: 1920, height: 1080 },
+                executablePath: await chromium_1.default.executablePath(),
+                headless: true,
+            });
+        }
+        page = await browser.newPage();
+        // Block unnecessary resources to speed up page load
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            const resourceType = req.resourceType();
+            if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font' || resourceType === 'media') {
+                req.abort();
+            }
+            else {
+                req.continue();
+            }
         });
-        const page = await browser.newPage();
         // Simulate mobile/desktop to avoid simple bot blocks
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36');
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
         // 1. Try to extract from JSON-LD
         const jsonLdData = await page.evaluate(() => {
             const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
@@ -149,8 +164,11 @@ async function scrapePrice(url) {
         return null;
     }
     finally {
-        if (browser !== null) {
-            await browser.close();
+        if (page !== null) {
+            await page.close().catch(() => { });
+        }
+        if (ownBrowser && browser !== null) {
+            await browser.close().catch(() => { });
         }
     }
 }
@@ -229,40 +247,68 @@ exports.nightlyScrape = functions
     .onRun(async (context) => {
     const itemsSnapshot = await db.collection('items').get();
     const changes = [];
-    for (const doc of itemsSnapshot.docs) {
-        const itemData = doc.data();
-        const oldPrice = itemData.currentPrice;
-        const newPrice = await scrapePrice(itemData.url);
-        if (newPrice !== null) {
-            if (newPrice !== oldPrice) {
-                changes.push({
-                    name: itemData.name,
-                    oldPrice: oldPrice,
-                    newPrice: newPrice,
-                    url: itemData.url,
-                    ownerId: itemData.userId,
-                    diff: newPrice - oldPrice
-                });
-                const today = new Date().toISOString().split('T')[0];
-                let history = itemData.history || [];
-                if (history.length > 0 && history[history.length - 1].date === today) {
-                    history[history.length - 1] = { date: today, price: newPrice };
+    const docs = itemsSnapshot.docs;
+    // Launch a single browser instance for the entire batch
+    let browser = null;
+    try {
+        browser = await puppeteer_core_1.default.launch({
+            args: chromium_1.default.args,
+            defaultViewport: { width: 1920, height: 1080 },
+            executablePath: await chromium_1.default.executablePath(),
+            headless: true,
+        });
+    }
+    catch (err) {
+        console.error("Failed to launch browser for nightlyScrape:", err);
+        return null;
+    }
+    const CONCURRENCY = 4; // Process up to 4 pages concurrently
+    for (let i = 0; i < docs.length; i += CONCURRENCY) {
+        const batch = docs.slice(i, i + CONCURRENCY);
+        const batchPromises = batch.map(async (doc) => {
+            try {
+                const itemData = doc.data();
+                const oldPrice = itemData.currentPrice;
+                const newPrice = await scrapePrice(itemData.url, browser || undefined);
+                if (newPrice !== null) {
+                    if (newPrice !== oldPrice) {
+                        changes.push({
+                            name: itemData.name,
+                            oldPrice: oldPrice,
+                            newPrice: newPrice,
+                            url: itemData.url,
+                            ownerId: itemData.userId,
+                            diff: newPrice - oldPrice
+                        });
+                        const today = new Date().toISOString().split('T')[0];
+                        let history = itemData.history || [];
+                        if (history.length > 0 && history[history.length - 1].date === today) {
+                            history[history.length - 1] = { date: today, price: newPrice };
+                        }
+                        else {
+                            history.push({ date: today, price: newPrice });
+                        }
+                        await doc.ref.update({
+                            currentPrice: newPrice,
+                            history: history,
+                            lastChecked: new Date().toISOString()
+                        });
+                    }
+                    else {
+                        await doc.ref.update({
+                            lastChecked: new Date().toISOString()
+                        });
+                    }
                 }
-                else {
-                    history.push({ date: today, price: newPrice });
-                }
-                await doc.ref.update({
-                    currentPrice: newPrice,
-                    history: history,
-                    lastChecked: new Date().toISOString()
-                });
             }
-            else {
-                await doc.ref.update({
-                    lastChecked: new Date().toISOString()
-                });
+            catch (err) {
+                console.error(`Error processing doc ${doc.id}:`, err);
             }
-        }
+        });
+        await Promise.all(batchPromises);
+    }
+    if (browser) {
+        await browser.close().catch(() => { });
     }
     // Process and send email if there are changes
     if (changes.length > 0) {

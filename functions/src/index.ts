@@ -1,6 +1,6 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
-import puppeteer from 'puppeteer-core';
+import puppeteer, { Browser } from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 import { Resend } from 'resend';
 
@@ -8,20 +8,37 @@ admin.initializeApp();
 const db = admin.firestore();
 
 // Helper to scrape a single URL
-async function scrapePrice(url: string): Promise<number | null> {
-  let browser = null;
+async function scrapePrice(url: string, existingBrowser?: Browser): Promise<number | null> {
+  let browser = existingBrowser || null;
+  let page = null;
+  let ownBrowser = !existingBrowser; // Keep track of whether we launched it
+
   try {
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: { width: 1920, height: 1080 } as any,
-      executablePath: await chromium.executablePath(),
-      headless: true,
+    if (!browser) {
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: { width: 1920, height: 1080 } as any,
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      });
+    }
+
+    page = await browser.newPage();
+
+    // Block unnecessary resources to speed up page load
+    await page.setRequestInterception(true);
+    page.on('request', (req: any) => {
+      const resourceType = req.resourceType();
+      if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font' || resourceType === 'media') {
+        req.abort();
+      } else {
+        req.continue();
+      }
     });
 
-    const page = await browser.newPage();
     // Simulate mobile/desktop to avoid simple bot blocks
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36');
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
 
     // 1. Try to extract from JSON-LD
     const jsonLdData = await page.evaluate(() => {
@@ -111,8 +128,11 @@ async function scrapePrice(url: string): Promise<number | null> {
     console.error(`Error scraping ${url}:`, error);
     return null;
   } finally {
-    if (browser !== null) {
-      await browser.close();
+    if (page !== null) {
+      await page.close().catch(() => {});
+    }
+    if (ownBrowser && browser !== null) {
+      await browser.close().catch(() => {});
     }
   }
 }
@@ -209,42 +229,73 @@ export const nightlyScrape = functions
     }
 
     const changes: ItemChange[] = [];
+    const docs = itemsSnapshot.docs;
 
-    for (const doc of itemsSnapshot.docs) {
-      const itemData = doc.data();
-      const oldPrice = itemData.currentPrice;
-      const newPrice = await scrapePrice(itemData.url);
+    // Launch a single browser instance for the entire batch
+    let browser: Browser | null = null;
+    try {
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: { width: 1920, height: 1080 } as any,
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      });
+    } catch (err) {
+      console.error("Failed to launch browser for nightlyScrape:", err);
+      return null;
+    }
 
-      if (newPrice !== null) {
-        if (newPrice !== oldPrice) {
-          changes.push({
-            name: itemData.name,
-            oldPrice: oldPrice,
-            newPrice: newPrice,
-            url: itemData.url,
-            ownerId: itemData.userId,
-            diff: newPrice - oldPrice
-          });
+    const CONCURRENCY = 4; // Process up to 4 pages concurrently
 
-          const today = new Date().toISOString().split('T')[0];
-          let history = itemData.history || [];
-          if (history.length > 0 && history[history.length - 1].date === today) {
-             history[history.length - 1] = { date: today, price: newPrice };
-          } else {
-             history.push({ date: today, price: newPrice });
+    for (let i = 0; i < docs.length; i += CONCURRENCY) {
+      const batch = docs.slice(i, i + CONCURRENCY);
+
+      const batchPromises = batch.map(async (doc) => {
+        try {
+          const itemData = doc.data();
+          const oldPrice = itemData.currentPrice;
+          const newPrice = await scrapePrice(itemData.url, browser || undefined);
+
+          if (newPrice !== null) {
+            if (newPrice !== oldPrice) {
+              changes.push({
+                name: itemData.name,
+                oldPrice: oldPrice,
+                newPrice: newPrice,
+                url: itemData.url,
+                ownerId: itemData.userId,
+                diff: newPrice - oldPrice
+              });
+
+              const today = new Date().toISOString().split('T')[0];
+              let history = itemData.history || [];
+              if (history.length > 0 && history[history.length - 1].date === today) {
+                 history[history.length - 1] = { date: today, price: newPrice };
+              } else {
+                 history.push({ date: today, price: newPrice });
+              }
+
+              await doc.ref.update({
+                currentPrice: newPrice,
+                history: history,
+                lastChecked: new Date().toISOString()
+              });
+            } else {
+              await doc.ref.update({
+                lastChecked: new Date().toISOString()
+              });
+            }
           }
-
-          await doc.ref.update({
-            currentPrice: newPrice,
-            history: history,
-            lastChecked: new Date().toISOString()
-          });
-        } else {
-          await doc.ref.update({
-            lastChecked: new Date().toISOString()
-          });
+        } catch (err) {
+          console.error(`Error processing doc ${doc.id}:`, err);
         }
-      }
+      });
+
+      await Promise.all(batchPromises);
+    }
+
+    if (browser) {
+      await browser.close().catch(() => {});
     }
 
     // Process and send email if there are changes
