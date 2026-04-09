@@ -388,7 +388,9 @@ exports.refreshItemPrice = functions
             updateData.lastScrapeError = admin.firestore.FieldValue.delete();
         }
         await itemRef.update(updateData);
-        return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice, lastScrapeError: updateData.lastScrapeError };
+        // Do not return FieldValue.delete() to the client
+        const returnError = newPrice === null ? updateData.lastScrapeError : null;
+        return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice, lastScrapeError: returnError };
     }
 });
 // Scheduled function to scrape all items and send summary email
