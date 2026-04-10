@@ -5,6 +5,7 @@ import { AddItemModal } from '../components/AddItemModal';
 import { EditItemModal } from '../components/EditItemModal';
 import { ItemDetailModal } from '../components/ItemDetailModal';
 import { AddBoardModal } from '../components/AddBoardModal';
+import { EditPriceHistoryModal } from '../components/EditPriceHistoryModal';
 import { EditBoardModal } from '../components/EditBoardModal';
 import { BoardData } from '../components/Sidebar';
 import Masonry from 'react-masonry-css';
@@ -35,6 +36,7 @@ export function Dashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAddBoardModalOpen, setIsAddBoardModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isEditPriceModalOpen, setIsEditPriceModalOpen] = useState(false);
   const [isEditBoardModalOpen, setIsEditBoardModalOpen] = useState(false);
   const [selectedBoardToEdit, setSelectedBoardToEdit] = useState<BoardData | null>(null);
   const [isBoardRefreshing, setIsBoardRefreshing] = useState(false);
@@ -818,8 +820,16 @@ export function Dashboard() {
         onRefresh={handleRefreshItem}
         onDelete={handleDeleteItem}
         onEdit={() => setIsEditModalOpen(true)}
+        onEditPriceHistory={() => setIsEditPriceModalOpen(true)}
         isRefreshing={isRefreshing}
         notification={notification}
+      />
+
+      <EditPriceHistoryModal
+        isOpen={isEditPriceModalOpen}
+        onClose={() => setIsEditPriceModalOpen(false)}
+        onSubmit={handleEditItem}
+        item={selectedItem}
       />
 
       <EditItemModal

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, RefreshCw, ExternalLink, Edit2, Trash2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { X, RefreshCw, ExternalLink, Edit2, Trash2, AlertTriangle, CheckCircle2, Settings } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis, XAxis, Tooltip, CartesianGrid } from 'recharts';
 import { cn } from '../utils/cn';
 
@@ -10,11 +10,12 @@ interface ItemDetailModalProps {
   onRefresh: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: () => void;
+  onEditPriceHistory: () => void;
   isRefreshing?: boolean;
   notification?: { message: string, type: 'success' | 'info' | 'error' } | null;
 }
 
-export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, onEdit, isRefreshing, notification }: ItemDetailModalProps) {
+export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, onEdit, onEditPriceHistory, isRefreshing, notification }: ItemDetailModalProps) {
   if (!isOpen || !item) return null;
 
   const formattedPrice = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(item.currentPrice);
@@ -130,7 +131,12 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
               </div>
 
               <div className="flex-1 min-h-[300px] border border-[#dee2e6] rounded-2xl p-4 sm:p-6 bg-[#f8f9fa]">
-                <h4 className="text-sm font-semibold text-[#212529] mb-4">Historique des prix</h4>
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-sm font-semibold text-[#212529]">Historique des prix</h4>
+                  <button onClick={onEditPriceHistory} className="p-1.5 text-[#6c757d] hover:text-[#212529] hover:bg-[#dee2e6] rounded-lg transition-colors" title="Modifier l'historique des prix">
+                    <Settings className="w-4 h-4" />
+                  </button>
+                </div>
                 <div className="w-full h-[200px] sm:h-[250px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={item.history}>
