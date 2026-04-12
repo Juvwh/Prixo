@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.nightlyScrape = exports.refreshItemPrice = exports.refreshBoardItemsPrice = void 0;
+exports.testEmailNotification = exports.nightlyScrape = exports.refreshItemPrice = exports.refreshBoardItemsPrice = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
 const puppeteer_core_1 = __importDefault(require("puppeteer-core"));
@@ -528,5 +528,80 @@ exports.nightlyScrape = functions
         }
     }
     return null;
+});
+exports.testEmailNotification = functions
+    .region('europe-west1')
+    .runWith({
+    memory: '256MB',
+    secrets: ['RESEND_API_KEY']
+})
+    .https.onCall(async (data, context) => {
+    // Verify authentication
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated to trigger this function.');
+    }
+    const resendApiKey = process.env.RESEND_API_KEY;
+    if (!resendApiKey) {
+        console.error("RESEND_API_KEY missing");
+        throw new functions.https.HttpsError('internal', 'Configuration de messagerie manquante.');
+    }
+    const resend = new resend_1.Resend(resendApiKey);
+    // Get the authenticated user's email
+    let userEmail = context.auth.token.email;
+    if (!userEmail) {
+        try {
+            const userRecord = await admin.auth().getUser(context.auth.uid);
+            userEmail = userRecord.email;
+        }
+        catch (err) {
+            console.error("Error fetching user email:", err);
+        }
+    }
+    if (!userEmail) {
+        throw new functions.https.HttpsError('failed-precondition', "Impossible de récupérer l'adresse email de l'utilisateur.");
+    }
+    // Simulated data
+    const simulatedChanges = [
+        {
+            name: "Canapé d'angle réversible scandinave (Simulé)",
+            oldPrice: 899,
+            newPrice: 749,
+            diff: -150,
+            url: "https://example.com/canape"
+        },
+        {
+            name: "Table basse en chêne massif (Simulé)",
+            oldPrice: 120,
+            newPrice: 150,
+            diff: 30,
+            url: "https://example.com/table"
+        }
+    ];
+    let htmlContent = '<h2>Récapitulatif des changements de prix (TEST)</h2><ul>';
+    for (const change of simulatedChanges) {
+        const color = change.diff < 0 ? 'green' : 'red';
+        const arrow = change.diff < 0 ? '↓' : '↑';
+        htmlContent += `
+        <li style="margin-bottom: 10px;">
+          <strong>${change.name}</strong><br/>
+          Ancien prix: ${change.oldPrice}€ | Nouveau prix: <span style="color:${color}">${change.newPrice}€ ${arrow}</span><br/>
+          <a href="${change.url}">Voir sur le site</a>
+        </li>
+       `;
+    }
+    htmlContent += '</ul><p><em>Ceci est un email de test généré depuis vos paramètres Prixo.</em></p>';
+    try {
+        await resend.emails.send({
+            from: 'Prixo <onboarding@resend.dev>', // Use verified domain in prod
+            to: [userEmail],
+            subject: 'Prixo - Email de test (Notification de prix)',
+            html: htmlContent
+        });
+        return { success: true, message: 'Email de test envoyé avec succès.' };
+    }
+    catch (error) {
+        console.error("Erreur lors de l'envoi de l'email via Resend:", error);
+        throw new functions.https.HttpsError('internal', "Erreur lors de l'envoi de l'email.");
+    }
 });
 //# sourceMappingURL=index.js.map
