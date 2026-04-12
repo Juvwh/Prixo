@@ -7,6 +7,7 @@ import { ItemDetailModal } from '../components/ItemDetailModal';
 import { AddBoardModal } from '../components/AddBoardModal';
 import { EditPriceHistoryModal } from '../components/EditPriceHistoryModal';
 import { EditBoardModal } from '../components/EditBoardModal';
+import { SettingsModal } from '../components/SettingsModal';
 import { BoardData } from '../components/Sidebar';
 import Masonry from 'react-masonry-css';
 import { auth, db, functions } from '../firebase/config';
@@ -51,6 +52,7 @@ export function Dashboard() {
   const { user } = useAuth();
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isBellOpen, setIsBellOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'custom' | 'date_desc' | 'favorites_first' | 'last_change_desc' | 'price_asc' | 'price_desc'>('custom');
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
 
@@ -96,6 +98,13 @@ export function Dashboard() {
       setShowPrivateItems(false);
     }
   }, [selectedBoardId, boardsData]);
+
+  // Settings modal listener
+  useEffect(() => {
+    const handleOpenSettings = () => setIsSettingsModalOpen(true);
+    document.addEventListener('open-settings-modal', handleOpenSettings);
+    return () => document.removeEventListener('open-settings-modal', handleOpenSettings);
+  }, []);
 
   // Fetch Boards
   useEffect(() => {
@@ -333,22 +342,38 @@ export function Dashboard() {
     return 0;
   };
 
-  const unreadItems = items.filter(item => {
-    if (item.userId !== user?.uid) return false;
-    const lastChangeDate = getLastPriceChangeDate(item);
-    if (!lastChangeDate) return false;
+  // Refactored notification history logic
+  const notificationHistory = items
+    .filter(item => item.userId === user?.uid)
+    .map(item => {
+      const lastChangeDate = getLastPriceChangeDate(item);
+      return { item, lastChangeDate };
+    })
+    .filter(entry => entry.lastChangeDate !== null)
+    .sort((a, b) => new Date(b.lastChangeDate!).getTime() - new Date(a.lastChangeDate!).getTime())
+    .slice(0, 10)
+    .map(entry => entry.item);
 
-    const changeDateMs = new Date(lastChangeDate).getTime();
+  const getUnreadCount = () => {
+    let count = 0;
+    for (const item of notificationHistory) {
+      const lastChangeDate = getLastPriceChangeDate(item);
+      if (!lastChangeDate) continue;
 
-    if (!userProfile?.lastNotificationReadAt) {
-        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        return changeDateMs > sevenDaysAgo;
+      const changeDateMs = new Date(lastChangeDate).getTime();
+
+      if (!userProfile?.lastNotificationReadAt) {
+          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          if (changeDateMs > sevenDaysAgo) count++;
+      } else {
+          const readAtMs = userProfile.lastNotificationReadAt.toMillis ? userProfile.lastNotificationReadAt.toMillis() : new Date(userProfile.lastNotificationReadAt).getTime();
+          if (changeDateMs > readAtMs) count++;
+      }
     }
+    return count;
+  };
 
-    const readAtMs = userProfile.lastNotificationReadAt.toMillis ? userProfile.lastNotificationReadAt.toMillis() : new Date(userProfile.lastNotificationReadAt).getTime();
-
-    return changeDateMs > readAtMs;
-  });
+  const unreadCount = getUnreadCount();
 
   // Filter and sort items based on selected board
   let displayedItems = items.filter(item => {
@@ -554,16 +579,36 @@ export function Dashboard() {
     setSelectedItemIds([]);
   };
 
+  const [frozenReadAtMs, setFrozenReadAtMs] = useState<number | null>(null);
+
   const handleBellClick = async () => {
-    setIsBellOpen(!isBellOpen);
-    if (!isBellOpen && user && unreadItems.length > 0) {
-      try {
-        await setDoc(doc(db, 'users', user.uid), {
-          lastNotificationReadAt: serverTimestamp()
-        }, { merge: true });
-      } catch (error) {
-        console.error("Error updating read status", error);
+    if (!isBellOpen) {
+      // Opening the bell: freeze the current read timestamp to maintain styling
+      if (userProfile?.lastNotificationReadAt) {
+        setFrozenReadAtMs(
+          userProfile.lastNotificationReadAt.toMillis
+            ? userProfile.lastNotificationReadAt.toMillis()
+            : new Date(userProfile.lastNotificationReadAt).getTime()
+        );
+      } else {
+        setFrozenReadAtMs(Date.now() - 7 * 24 * 60 * 60 * 1000);
       }
+      setIsBellOpen(true);
+
+      // Update the timestamp in DB to clear the badge
+      if (user && unreadCount > 0) {
+        try {
+          await setDoc(doc(db, 'users', user.uid), {
+            lastNotificationReadAt: serverTimestamp()
+          }, { merge: true });
+        } catch (error) {
+          console.error("Error updating read status", error);
+        }
+      }
+    } else {
+      // Closing the bell: unfreeze
+      setIsBellOpen(false);
+      setFrozenReadAtMs(null);
     }
   };
 
@@ -678,9 +723,9 @@ export function Dashboard() {
                     title="Notifications de prix"
                   >
                     <Bell size={20} />
-                    {unreadItems.length > 0 && (
+                    {unreadCount > 0 && (
                       <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-[#f8f9fa]">
-                        {unreadItems.length}
+                        {unreadCount}
                       </span>
                     )}
                   </button>
@@ -689,30 +734,46 @@ export function Dashboard() {
                   {isBellOpen && (
                     <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
                       <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                        <span className="font-semibold text-sm text-[#212529]">Modifications de prix</span>
-                        <span className="text-xs text-[#6c757d]">Derniers changements</span>
+                        <span className="font-semibold text-sm text-[#212529]">Historique des prix</span>
+                        <span className="text-xs text-[#6c757d]">10 derniers</span>
                       </div>
                       <div className="max-h-80 overflow-y-auto p-2">
-                        {unreadItems.length === 0 ? (
+                        {notificationHistory.length === 0 ? (
                           <div className="text-center py-6 text-sm text-[#6c757d]">
-                            Aucun nouveau changement de prix.
+                            Aucun historique disponible.
                           </div>
                         ) : (
-                          unreadItems.map((item) => {
+                          notificationHistory.map((item) => {
                             const diff = getPriceDifference(item);
                             const isDrop = diff < 0;
+                            const lastChangeDate = getLastPriceChangeDate(item);
+                            const changeDateMs = lastChangeDate ? new Date(lastChangeDate).getTime() : 0;
+                            const isUnread = frozenReadAtMs !== null && changeDateMs > frozenReadAtMs;
+
                             return (
-                              <div key={item.id} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors" onClick={() => { setIsBellOpen(false); setSelectedItem(item); }}>
-                                <img src={item.imageUrl} alt={item.name} className="w-12 h-12 object-contain rounded bg-white border border-gray-100" />
+                              <div
+                                key={item.id}
+                                className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors mb-1
+                                  ${isUnread
+                                    ? 'bg-yellow-50 hover:bg-yellow-100 ring-1 ring-yellow-400 shadow-sm'
+                                    : 'hover:bg-gray-50 opacity-75 grayscale-[0.3]'
+                                  }
+                                `}
+                                onClick={() => { setIsBellOpen(false); setFrozenReadAtMs(null); setSelectedItem(item); }}
+                              >
+                                <img src={item.imageUrl} alt={item.name} className="w-12 h-12 object-contain rounded bg-white border border-gray-200" />
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-[#212529] truncate">{item.name}</p>
                                   <div className="flex items-center gap-2 mt-1">
-                                    <span className="text-sm font-bold">{item.currentPrice}€</span>
-                                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${isDrop ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                    <span className={`text-sm font-bold ${isUnread ? 'text-[#212529]' : 'text-[#495057]'}`}>{item.currentPrice}€</span>
+                                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${isDrop ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} ${!isUnread && 'opacity-80'}`}>
                                       {isDrop ? '' : '+'}{diff.toFixed(2)}€
                                     </span>
                                   </div>
                                 </div>
+                                {isUnread && (
+                                  <div className="w-2 h-2 rounded-full bg-yellow-500 shrink-0 self-start mt-2"></div>
+                                )}
                               </div>
                             );
                           })
@@ -860,6 +921,10 @@ export function Dashboard() {
           items.filter(item => item.boards?.includes(selectedBoardToEdit.id))
         ) : []}
       />
+
+      {isSettingsModalOpen && (
+        <SettingsModal onClose={() => setIsSettingsModalOpen(false)} />
+      )}
     </div>
     </DndContext>
   );

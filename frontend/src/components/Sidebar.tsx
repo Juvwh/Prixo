@@ -170,13 +170,22 @@ export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogou
                <p className="text-sm font-medium text-[#212529] truncate">{userEmail || 'Utilisateur'}</p>
             </div>
           </div>
-          <button
-            onClick={onLogout}
-            className="flex items-center w-full px-2 py-2 text-sm font-medium text-[#6c757d] hover:text-[#212529] transition-colors rounded-lg"
-          >
-            <LogOut className="w-5 h-5 mr-3" />
-            Déconnexion
-          </button>
+          <div className="flex items-center justify-between">
+            <button
+              onClick={onLogout}
+              className="flex items-center flex-1 px-2 py-2 text-sm font-medium text-[#6c757d] hover:text-[#212529] transition-colors rounded-lg"
+            >
+              <LogOut className="w-5 h-5 mr-3" />
+              Déconnexion
+            </button>
+            <button
+              onClick={() => document.dispatchEvent(new CustomEvent('open-settings-modal'))}
+              className="p-2 text-[#6c757d] hover:text-[#212529] hover:bg-[#eef2f0] rounded-lg transition-colors"
+              title="Paramètres globaux"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
         </div>
       </aside>
 
