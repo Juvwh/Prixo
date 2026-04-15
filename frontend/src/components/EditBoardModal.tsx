@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Trash2, RefreshCw } from 'lucide-react';
+import { X, Trash2, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { BoardData } from './Sidebar';
 
 interface EditBoardModalProps {
@@ -19,6 +19,7 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
   const [showStatusList, setShowStatusList] = useState(false);
   const [refreshStartTime, setRefreshStartTime] = useState<number | null>(null);
   const [initialLastChecked, setInitialLastChecked] = useState<Record<string, string | null>>({});
+  const [initialPrices, setInitialPrices] = useState<Record<string, number | null>>({});
 
   useEffect(() => {
     if (board) {
@@ -31,6 +32,7 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
       setShowStatusList(false);
       setRefreshStartTime(null);
       setInitialLastChecked({});
+      setInitialPrices({});
     }
   }, [board, isOpen]);
 
@@ -59,14 +61,17 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
     setShowStatusList(true);
     setRefreshStartTime(Date.now());
 
-    // Store the initial lastChecked values to compare against later
+// Store the initial lastChecked values to compare against later
     const initialValues: Record<string, string | null> = {};
+    const initialPriceValues: Record<string, number | null> = {};
     if (boardItems) {
       boardItems.forEach(item => {
         initialValues[item.id] = item.lastChecked || null;
+        initialPriceValues[item.id] = item.currentPrice !== undefined ? item.currentPrice : null;
       });
     }
     setInitialLastChecked(initialValues);
+    setInitialPrices(initialPriceValues);
 
     await onRefresh(board.id);
   };
@@ -124,7 +129,7 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
                 ) : (
                   <ul className="space-y-2">
                     {boardItems.map((item) => {
-                      let statusText = 'En attente';
+let statusContent: React.ReactNode = 'En attente';
                       let statusColor = 'text-gray-500 bg-gray-100';
 
                       // Determine if the status is stale by comparing against the original lastChecked string
@@ -133,13 +138,45 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
 
                       if (!isStale) {
                         if (item.scrapeStatus === 'scraping') {
-                          statusText = 'En cours...';
+                          statusContent = 'En cours...';
                           statusColor = 'text-blue-600 bg-blue-50';
                         } else if (item.scrapeStatus === 'success') {
-                          statusText = 'Succès';
-                          statusColor = 'text-green-600 bg-green-50';
+                          const oldPrice = initialPrices[item.id];
+                          const newPrice = item.currentPrice;
+
+                          if (oldPrice == null) {
+                             statusContent = `${newPrice}€`;
+                             statusColor = 'text-green-600 bg-green-50';
+                          } else {
+                             const diff = newPrice - oldPrice;
+                             if (diff > 0) {
+                                statusContent = (
+                                  <span className="flex items-center gap-1">
+                                    <TrendingUp className="w-3 h-3" />
+                                    En hausse (+{diff.toFixed(2)}€)
+                                  </span>
+                                );
+                                statusColor = 'text-red-600 bg-red-50';
+                             } else if (diff < 0) {
+                                statusContent = (
+                                  <span className="flex items-center gap-1">
+                                    <TrendingDown className="w-3 h-3" />
+                                    En baisse (-{Math.abs(diff).toFixed(2)}€)
+                                  </span>
+                                );
+                                statusColor = 'text-green-600 bg-green-50';
+                             } else {
+                                statusContent = (
+                                  <span className="flex items-center gap-1">
+                                    <Minus className="w-3 h-3" />
+                                    Prix inchangé
+                                  </span>
+                                );
+                                statusColor = 'text-gray-600 bg-gray-100';
+                             }
+                          }
                         } else if (item.scrapeStatus === 'error') {
-                          statusText = 'Erreur';
+                          statusContent = 'Erreur';
                           statusColor = 'text-red-600 bg-red-50';
                         }
                       }
@@ -148,7 +185,7 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
                         <li key={item.id} className="flex justify-between items-center text-xs p-2 rounded hover:bg-gray-50">
                           <span className="truncate pr-2 font-medium text-[#495057]" title={item.name}>{item.name}</span>
                           <span className={`px-2 py-1 rounded-md whitespace-nowrap ${statusColor}`}>
-                            {statusText}
+                            {statusContent}
                           </span>
                         </li>
                       );
