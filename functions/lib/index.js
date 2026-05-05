@@ -415,7 +415,7 @@ exports.refreshItemPrice = functions
 exports.nightlyScrape = functions
     .region('europe-west1')
     .runWith({ memory: '2GB', timeoutSeconds: 540, secrets: ["RESEND_API_KEY"] })
-    .pubsub.schedule('0 3 * * *') // Every day at 3:00 AM
+    .pubsub.schedule('30 6 * * *') // Every day at 6:30 AM
     .timeZone('Europe/Paris')
     .onRun(async (context) => {
     const itemsSnapshot = await db.collection('items').get();
@@ -439,12 +439,12 @@ exports.nightlyScrape = functions
     for (let i = 0; i < docs.length; i += CONCURRENCY) {
         const batch = docs.slice(i, i + CONCURRENCY);
         const batchPromises = batch.map(async (doc, index) => {
-            // Jitter: random delay between 2 and 4 seconds between starts
-            if (index > 0) {
-                const jitter = Math.floor(Math.random() * (4000 - 2000 + 1) + 2000);
-                await sleep(jitter * index);
-            }
             try {
+                // Jitter: random delay between 2 and 4 seconds between starts
+                if (index > 0) {
+                    const jitter = Math.floor(Math.random() * (4000 - 2000 + 1) + 2000);
+                    await sleep(jitter * index);
+                }
                 const itemData = doc.data();
                 const oldPrice = itemData.currentPrice;
                 const { price: newPrice, error: scrapeError } = await scrapePrice(itemData.url, browser || undefined);
@@ -484,10 +484,19 @@ exports.nightlyScrape = functions
                 await doc.ref.update(updateData);
             }
             catch (err) {
+                try {
+                    await doc.ref.update({
+                        scrapeStatus: 'error',
+                        lastScrapeError: err instanceof Error ? err.message : "Erreur inattendue"
+                    });
+                }
+                catch (updateErr) {
+                    console.error(`Failed to update error state for doc ${doc.id}:`, updateErr);
+                }
                 console.error(`Error processing doc ${doc.id}:`, err);
             }
         });
-        await Promise.all(batchPromises);
+        await Promise.allSettled(batchPromises);
     }
     if (browser) {
         await browser.close().catch(() => { });
@@ -502,9 +511,20 @@ exports.nightlyScrape = functions
             return null;
         }
         const resend = new resend_1.Resend(resendApiKey);
-        // Fetch the two hardcoded users
-        const usersSnapshot = await admin.auth().listUsers(2);
-        const emails = usersSnapshot.users.map(u => u.email).filter((e) => !!e);
+        // Fetch the emails dynamically by getting UIDs from the 'users' collection
+        const usersCollectionSnapshot = await db.collection('users').get();
+        const emails = [];
+        for (const userDoc of usersCollectionSnapshot.docs) {
+            try {
+                const userRecord = await admin.auth().getUser(userDoc.id);
+                if (userRecord.email) {
+                    emails.push(userRecord.email);
+                }
+            }
+            catch (err) {
+                console.error(`Failed to fetch email for user ${userDoc.id}:`, err);
+            }
+        }
         if (emails.length > 0) {
             let htmlContent = '<h2>Récapitulatif des changements de prix</h2><ul>';
             for (const change of changes) {
