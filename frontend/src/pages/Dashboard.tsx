@@ -12,7 +12,7 @@ import { BoardData } from '../components/Sidebar';
 import Masonry from 'react-masonry-css';
 import { auth, db, functions } from '../firebase/config';
 import { signOut } from 'firebase/auth';
-import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, setDoc, serverTimestamp, orderBy, where, or } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, setDoc, serverTimestamp, orderBy, where, or, and } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
   DndContext,
@@ -74,10 +74,12 @@ export function Dashboard() {
     if (!user || !userProfile?.groupId) return;
     const q = query(
       collection(db, 'items'),
-      where('groupId', '==', userProfile.groupId),
-      or(
-        where('isPrivate', '==', false),
-        where('userId', '==', user.uid)
+      and(
+        where('groupId', '==', userProfile.groupId),
+        or(
+          where('isPrivate', '==', false),
+          where('userId', '==', user.uid)
+        )
       )
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -112,10 +114,12 @@ export function Dashboard() {
     if (!user || !userProfile?.groupId) return;
     const q = query(
       collection(db, 'boards'),
-      where('groupId', '==', userProfile.groupId),
-      or(
-        where('isPrivate', '==', false),
-        where('ownerId', '==', user.uid)
+      and(
+        where('groupId', '==', userProfile.groupId),
+        or(
+          where('isPrivate', '==', false),
+          where('ownerId', '==', user.uid)
+        )
       )
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
