@@ -2,26 +2,40 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Only authenticated users can access the database
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    function getUserGroup() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.groupId;
     }
 
     match /items/{itemId} {
       allow read: if request.auth != null &&
+                  resource.data.groupId == getUserGroup() &&
                   (!resource.data.isPrivate || resource.data.userId == request.auth.uid);
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null &&
+                    request.resource.data.userId == request.auth.uid &&
+                    request.resource.data.groupId == getUserGroup();
+      allow update, delete: if request.auth != null &&
+                            resource.data.groupId == getUserGroup() &&
+                            resource.data.userId == request.auth.uid;
     }
 
     match /boards/{boardId} {
       allow read: if request.auth != null &&
+                  resource.data.groupId == getUserGroup() &&
                   (!resource.data.isPrivate || resource.data.ownerId == request.auth.uid);
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow create: if request.auth != null &&
+                    request.resource.data.ownerId == request.auth.uid &&
+                    request.resource.data.groupId == getUserGroup();
+      allow update, delete: if request.auth != null &&
+                            resource.data.groupId == getUserGroup() &&
+                            resource.data.ownerId == request.auth.uid;
     }
 
     match /users/{userId} {
+      // Users can only read their own profile, or maybe they can read others in their group?
+      // Since there's no need to read others' profiles in the app yet, let's keep it open to auth for now,
+      // or restrict to same group. The task doesn't explicitly restrict reading users collection,
+      // but let's restrict to authenticated users as before.
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == userId;
     }

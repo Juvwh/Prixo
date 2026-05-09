@@ -71,9 +71,10 @@ export function Dashboard() {
 
   // Fetch Items
   useEffect(() => {
-    if (!user) return;
+    if (!user || !userProfile?.groupId) return;
     const q = query(
       collection(db, 'items'),
+      where('groupId', '==', userProfile.groupId),
       or(
         where('isPrivate', '==', false),
         where('userId', '==', user.uid)
@@ -85,7 +86,7 @@ export function Dashboard() {
       setItems(fetchedItems);
     });
     return unsubscribe;
-  }, [user]);
+  }, [user, userProfile]);
 
   // Default showPrivateItems based on board privacy
   useEffect(() => {
@@ -108,9 +109,10 @@ export function Dashboard() {
 
   // Fetch Boards
   useEffect(() => {
-    if (!user) return;
+    if (!user || !userProfile?.groupId) return;
     const q = query(
       collection(db, 'boards'),
+      where('groupId', '==', userProfile.groupId),
       or(
         where('isPrivate', '==', false),
         where('ownerId', '==', user.uid)
@@ -123,7 +125,7 @@ export function Dashboard() {
       setBoardsData(fetchedBoards);
     });
     return unsubscribe;
-  }, [user]);
+  }, [user, userProfile]);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -135,6 +137,7 @@ export function Dashboard() {
       const docRef = await addDoc(collection(db, 'boards'), {
         ...data,
         ownerId: user.uid,
+        groupId: userProfile?.groupId || '',
         itemOrder: [],
         createdAt: serverTimestamp(),
       });
@@ -152,6 +155,7 @@ export function Dashboard() {
       const docRef = await addDoc(collection(db, 'items'), {
         ...data,
         userId: user.uid,
+        groupId: userProfile?.groupId || '',
         currentPrice: 0, // Will be updated by initial scrape
         history: [],
         createdAt: serverTimestamp(),

@@ -185,13 +185,20 @@ export const refreshBoardItemsPrice = functions
       throw new functions.https.HttpsError('invalid-argument', 'Board ID is required.');
     }
 
+    // Get user's groupId
+    const userDoc = await db.collection('users').doc(context.auth.uid).get();
+    const userGroupId = userDoc.data()?.groupId;
+
+    if (!userGroupId) {
+      throw new functions.https.HttpsError('failed-precondition', 'User has no groupId assigned.');
+    }
+
     let itemsSnapshot;
 
     if (boardId === 'all') {
-      // Get all items accessible to the user (their own items + public items)
-      // Since this application is intended for a very small number of users,
-      // we can safely scrape all public items + the user's own items.
+      // Get all items accessible to the user (their own items + public items) within their group
       itemsSnapshot = await db.collection('items')
+        .where('groupId', '==', userGroupId)
         .where(
           admin.firestore.Filter.or(
             admin.firestore.Filter.where('isPrivate', '==', false),
@@ -200,8 +207,9 @@ export const refreshBoardItemsPrice = functions
         )
         .get();
     } else if (boardId === 'favorites') {
-      // Get all favorite items belonging to the user
+      // Get all favorite items belonging to the user within their group
       itemsSnapshot = await db.collection('items')
+        .where('groupId', '==', userGroupId)
         .where('userId', '==', context.auth.uid)
         .where('isFavorite', '==', true)
         .get();
@@ -423,6 +431,8 @@ export const nightlyScrape = functions
       newPrice: number;
       url: string;
       ownerId: string;
+      groupId: string;
+      isPrivate: boolean;
       diff: number;
     }
 
@@ -473,6 +483,8 @@ export const nightlyScrape = functions
                 newPrice: newPrice,
                 url: itemData.url,
                 ownerId: itemData.userId,
+                groupId: itemData.groupId,
+                isPrivate: itemData.isPrivate || false,
                 diff: newPrice - oldPrice
               });
 
@@ -517,9 +529,6 @@ export const nightlyScrape = functions
 
     // Process and send email if there are changes
     if (changes.length > 0) {
-      // Sort: Price drops first, then price increases
-      changes.sort((a, b) => a.diff - b.diff);
-
       const resendApiKey = process.env.RESEND_API_KEY;
       if (!resendApiKey) {
         console.error("RESEND_API_KEY missing");
@@ -528,43 +537,59 @@ export const nightlyScrape = functions
 
       const resend = new Resend(resendApiKey);
 
-      // Fetch the emails dynamically by getting UIDs from the 'users' collection
+      // Fetch all users to determine who gets what email
       const usersCollectionSnapshot = await db.collection('users').get();
-      const emails: string[] = [];
 
       for (const userDoc of usersCollectionSnapshot.docs) {
+        const userData = userDoc.data();
+        const userGroupId = userData.groupId;
+        const userId = userDoc.id;
+
+        if (!userGroupId) continue;
+
         try {
-          const userRecord = await admin.auth().getUser(userDoc.id);
-          if (userRecord.email) {
-            emails.push(userRecord.email);
+          const userRecord = await admin.auth().getUser(userId);
+          const email = userRecord.email;
+
+          if (!email) continue;
+
+          // Filter changes for this specific user
+          // 1. Match groupId
+          // 2. Either public OR private but owned by this user
+          const userChanges = changes.filter(change => {
+            const isMatch = change.groupId === userGroupId && (!change.isPrivate || change.ownerId === userId);
+            return isMatch;
+          });
+
+          if (userChanges.length > 0) {
+            // Sort: Price drops first, then price increases
+            userChanges.sort((a, b) => a.diff - b.diff);
+
+            let htmlContent = '<h2>Récapitulatif des changements de prix</h2><ul>';
+
+            for (const change of userChanges) {
+               const color = change.diff < 0 ? 'green' : 'red';
+               const arrow = change.diff < 0 ? '↓' : '↑';
+               htmlContent += `
+                <li style="margin-bottom: 10px;">
+                  <strong>${change.name}</strong><br/>
+                  Ancien prix: ${change.oldPrice}€ | Nouveau prix: <span style="color:${color}">${change.newPrice}€ ${arrow}</span><br/>
+                  <a href="${change.url}">Voir sur le site</a>
+                </li>
+               `;
+            }
+            htmlContent += '</ul>';
+
+            await resend.emails.send({
+              from: 'Prixo <onboarding@resend.dev>', // Use verified domain in prod
+              to: [email],
+              subject: 'Prixo - Changements de prix détectés',
+              html: htmlContent
+            });
           }
         } catch (err) {
-          console.error(`Failed to fetch email for user ${userDoc.id}:`, err);
+          console.error(`Failed to fetch email or send for user ${userId}:`, err);
         }
-      }
-
-      if (emails.length > 0) {
-        let htmlContent = '<h2>Récapitulatif des changements de prix</h2><ul>';
-
-        for (const change of changes) {
-           const color = change.diff < 0 ? 'green' : 'red';
-           const arrow = change.diff < 0 ? '↓' : '↑';
-           htmlContent += `
-            <li style="margin-bottom: 10px;">
-              <strong>${change.name}</strong><br/>
-              Ancien prix: ${change.oldPrice}€ | Nouveau prix: <span style="color:${color}">${change.newPrice}€ ${arrow}</span><br/>
-              <a href="${change.url}">Voir sur le site</a>
-            </li>
-           `;
-        }
-        htmlContent += '</ul>';
-
-        await resend.emails.send({
-          from: 'Prixo <onboarding@resend.dev>', // Use verified domain in prod
-          to: emails,
-          subject: 'Prixo - Changements de prix détectés',
-          html: htmlContent
-        });
       }
     }
 
@@ -650,5 +675,48 @@ export const testEmailNotification = functions
     } catch (error) {
       console.error("Erreur lors de l'envoi de l'email via Resend:", error);
       throw new functions.https.HttpsError('internal', "Erreur lors de l'envoi de l'email.");
+    }
+  });
+
+export const migrateToGroupA = functions
+  .region('europe-west1')
+  .https.onRequest(async (req, res) => {
+    try {
+      const defaultGroupId = 'group_A';
+
+      // Migrate users
+      const usersSnap = await db.collection('users').get();
+      const userPromises = usersSnap.docs.map(doc => {
+        if (!doc.data().groupId) {
+          return doc.ref.update({ groupId: defaultGroupId });
+        }
+        return Promise.resolve();
+      });
+      await Promise.all(userPromises);
+
+      // Migrate items
+      const itemsSnap = await db.collection('items').get();
+      const itemPromises = itemsSnap.docs.map(doc => {
+        if (!doc.data().groupId) {
+          return doc.ref.update({ groupId: defaultGroupId });
+        }
+        return Promise.resolve();
+      });
+      await Promise.all(itemPromises);
+
+      // Migrate boards
+      const boardsSnap = await db.collection('boards').get();
+      const boardPromises = boardsSnap.docs.map(doc => {
+        if (!doc.data().groupId) {
+          return doc.ref.update({ groupId: defaultGroupId });
+        }
+        return Promise.resolve();
+      });
+      await Promise.all(boardPromises);
+
+      res.status(200).send("Migration to group_A completed successfully.");
+    } catch (error) {
+      console.error("Migration error:", error);
+      res.status(500).send("Migration failed.");
     }
   });
