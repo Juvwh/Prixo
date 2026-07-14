@@ -417,6 +417,296 @@ export const refreshItemPrice = functions
 });
 
 // Scheduled function to scrape all items and send summary email
+// Helper to extract links for ImmoSearch
+async function scrapeLinks(url: string, filterWord: string, existingBrowser?: Browser): Promise<{ links: string[], error: string | null }> {
+  let browser = existingBrowser || null;
+  let page = null;
+  let ownBrowser = !existingBrowser;
+
+  try {
+    if (!browser) {
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: { width: 1920, height: 1080 } as any,
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      });
+    }
+
+    page = await browser.newPage();
+
+    await page.setRequestInterception(true);
+    page.on('request', (req: any) => {
+      const resourceType = req.resourceType();
+      if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font' || resourceType === 'media') {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36');
+
+    try {
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      if (response && response.status() === 403) {
+        return { links: [], error: "Protection anti-bot ou accès refusé (Erreur 403)" };
+      }
+    } catch (gotoError: any) {
+      if (gotoError.message && gotoError.message.includes('Timeout')) {
+        return { links: [], error: "Délai d'attente dépassé (timeout)" };
+      }
+      throw gotoError;
+    }
+
+    // Scroll to bottom slowly to trigger lazy loading if any
+    await page.evaluate(async () => {
+        await new Promise<void>((resolve) => {
+            let totalHeight = 0;
+            const distance = 100;
+            const timer = setInterval(() => {
+                const scrollHeight = document.body.scrollHeight;
+                window.scrollBy(0, distance);
+                totalHeight += distance;
+                if (totalHeight >= scrollHeight - window.innerHeight) {
+                    clearInterval(timer);
+                    resolve();
+                }
+            }, 100);
+        });
+    });
+
+    await sleep(2000); // Give it a sec to load elements
+
+    const baseUrl = new URL(page.url()).origin;
+
+    const extractedLinks = await page.evaluate((filter, base) => {
+      const anchors = Array.from(document.querySelectorAll('a'));
+      const hrefs = anchors.map(a => a.getAttribute('href')).filter(Boolean) as string[];
+
+      const absoluteLinks = hrefs.map(href => {
+        try {
+           return new URL(href, base).href;
+        } catch(e) { return null; }
+      }).filter(Boolean) as string[];
+
+      // Unique links
+      const uniqueLinks = Array.from(new Set(absoluteLinks));
+
+      if (!filter) return uniqueLinks;
+
+      return uniqueLinks.filter(l => l.toLowerCase().includes(filter.toLowerCase()));
+    }, filterWord || '', baseUrl);
+
+    return { links: extractedLinks, error: null };
+  } catch (error: any) {
+    console.error(`Error scraping links on ${url}:`, error);
+    if (error.message && error.message.includes('Timeout')) {
+      return { links: [], error: "Délai d'attente dépassé (timeout)" };
+    }
+    return { links: [], error: "Erreur technique lors du chargement de la page" };
+  } finally {
+    if (page) await page.close().catch(() => {});
+    if (ownBrowser && browser) await browser.close().catch(() => {});
+  }
+}
+
+export const refreshImmoSearches = functions
+  .region('europe-west1')
+  .runWith({ memory: '2GB', timeoutSeconds: 540 })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
+    }
+
+    const userDoc = await db.collection('users').doc(context.auth.uid).get();
+    const userGroupId = userDoc.data()?.groupId;
+    if (!userGroupId) {
+      throw new functions.https.HttpsError('failed-precondition', 'User has no groupId assigned.');
+    }
+
+    const { searchId } = data;
+
+    let queryRef = db.collection('immo_searches').where('groupId', '==', userGroupId);
+    if (searchId) {
+      queryRef = queryRef.where(admin.firestore.FieldPath.documentId(), '==', searchId);
+    }
+
+    const snapshot = await queryRef.get();
+    if (snapshot.empty) {
+       return { success: true, message: 'Aucune recherche trouvée.' };
+    }
+
+    let browser: Browser | null = null;
+    try {
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: { width: 1920, height: 1080 } as any,
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      });
+    } catch (err) {
+      console.error("Failed to launch browser:", err);
+      throw new functions.https.HttpsError('internal', 'Failed to launch browser.');
+    }
+
+    let newLinksFound = 0;
+    try {
+      for (const docSnap of snapshot.docs) {
+        const searchData = docSnap.data();
+        await docSnap.ref.update({ isScraping: true, lastChecked: new Date().toISOString() });
+
+        const { links, error } = await scrapeLinks(searchData.url, searchData.filterWord || '', browser);
+
+        const oldLinks = searchData.links || [];
+        // Only keep links from the new scrape, adding them to old links if they weren't there (we don't delete old manually kept ones during refresh from the user's perspective, but actually wait, the prompt specified: "retirer les biens qui ne sont plus disponible (soit lorsque on rescrappe et que le système remarque que le bien a été retiré)". So we will completely replace the links list with the newly scraped one.
+
+        const updateData: any = {
+           isScraping: false,
+           lastChecked: new Date().toISOString()
+        };
+
+        if (error) {
+           updateData.lastError = error;
+        } else {
+           updateData.lastError = null;
+           updateData.links = links;
+           const newAdditions = links.filter((l: string) => !oldLinks.includes(l));
+           newLinksFound += newAdditions.length;
+        }
+
+        await docSnap.ref.update(updateData);
+      }
+    } finally {
+      if (browser) await browser.close().catch(() => {});
+    }
+
+    return { success: true, message: 'Actualisation terminée', newLinksCount: newLinksFound };
+  });
+
+export const hourlyImmoScrape = functions
+  .region('europe-west1')
+  .runWith({ memory: '2GB', timeoutSeconds: 540, secrets: ["RESEND_API_KEY"] })
+  .pubsub.schedule('0 6-21 * * *') // Every hour from 6:00 to 21:00 (Paris time)
+  .timeZone('Europe/Paris')
+  .onRun(async (context) => {
+    const snapshot = await db.collection('immo_searches').get();
+    if (snapshot.empty) return null;
+
+    interface SearchAlert {
+      searchName: string;
+      url: string;
+      newLinks: string[];
+      groupId: string;
+    }
+    const alerts: SearchAlert[] = [];
+
+    let browser: Browser | null = null;
+    try {
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: { width: 1920, height: 1080 } as any,
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      });
+    } catch (err) {
+      console.error("Failed to launch browser:", err);
+      return null;
+    }
+
+    const CONCURRENCY = 2;
+    for (let i = 0; i < snapshot.docs.length; i += CONCURRENCY) {
+      const batch = snapshot.docs.slice(i, i + CONCURRENCY);
+
+      const batchPromises = batch.map(async (docSnap, index) => {
+        try {
+          if (index > 0) await sleep(2000 * index);
+
+          const searchData = docSnap.data();
+          const { links, error } = await scrapeLinks(searchData.url, searchData.filterWord || '', browser || undefined);
+
+          if (!error && links.length > 0) {
+            const oldLinks = searchData.links || [];
+            const newLinks = links.filter(l => !oldLinks.includes(l));
+
+            if (newLinks.length > 0) {
+              alerts.push({
+                searchName: searchData.name,
+                url: searchData.url,
+                newLinks: newLinks,
+                groupId: searchData.groupId
+              });
+            }
+
+            await docSnap.ref.update({
+               links: links,
+               lastChecked: new Date().toISOString(),
+               lastError: null
+            });
+          } else if (error) {
+            await docSnap.ref.update({
+               lastChecked: new Date().toISOString(),
+               lastError: error
+            });
+          }
+        } catch (err) {
+           console.error("Error hourly immo:", err);
+        }
+      });
+      await Promise.allSettled(batchPromises);
+    }
+
+    if (browser) await browser.close().catch(() => {});
+
+    // Send emails
+    if (alerts.length > 0) {
+      const resendApiKey = process.env.RESEND_API_KEY;
+      if (!resendApiKey) return null;
+      const resend = new Resend(resendApiKey);
+
+      const usersSnap = await db.collection('users').get();
+
+      for (const userDoc of usersSnap.docs) {
+        const userData = userDoc.data();
+        const userGroupId = userData.groupId;
+        if (!userGroupId) continue;
+
+        const userAlerts = alerts.filter(a => a.groupId === userGroupId);
+        if (userAlerts.length === 0) continue;
+
+        try {
+          const userRecord = await admin.auth().getUser(userDoc.id);
+          if (!userRecord.email) continue;
+
+          let htmlContent = '<h2>Nouveaux biens immobiliers détectés !</h2><ul>';
+          for (const alert of userAlerts) {
+            htmlContent += `
+              <li style="margin-bottom: 15px;">
+                <strong>Recherche : ${alert.searchName}</strong><br/>
+                <a href="${alert.url}">Voir votre recherche</a><br/>
+                Nouveaux biens trouvés :
+                <ul>
+                  ${alert.newLinks.map((l, i) => `<li><a href="${l}">Nouveau bien #${i + 1}</a></li>`).join('')}
+                </ul>
+              </li>
+            `;
+          }
+          htmlContent += '</ul>';
+
+          await resend.emails.send({
+            from: 'Prixo <onboarding@resend.dev>',
+            to: [userRecord.email],
+            subject: 'Prixo Immo - Nouveaux biens trouvés',
+            html: htmlContent
+          });
+        } catch (e) {
+          console.error("Email error:", e);
+        }
+      }
+    }
+    return null;
+  });
+
 export const nightlyScrape = functions
   .region('europe-west1')
   .runWith({ memory: '2GB', timeoutSeconds: 540, secrets: ["RESEND_API_KEY"] })

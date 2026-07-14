@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, PlusSquare, LogOut, Heart, Menu, Lock, Settings } from 'lucide-react';
+import { Home, PlusSquare, LogOut, Heart, Menu, Lock, Settings, Search } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useDroppable } from '@dnd-kit/core';
 
@@ -78,6 +78,21 @@ export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogou
             >
               <Settings className="w-4 h-4" />
             </button>
+          </div>
+
+          <div
+            className={cn(
+              "group flex items-center justify-between w-full px-4 py-3 text-sm font-medium rounded-xl transition-colors cursor-pointer mt-2",
+              selectedBoardId === 'immo_search'
+                ? "text-[#212529] bg-[#eef2f0]"
+                : "text-[#6c757d] hover:bg-[#eef2f0]/50"
+            )}
+            onClick={() => { onSelectBoard('immo_search'); setIsMobileMenuOpen(false); }}
+          >
+            <div className="flex items-center">
+              <Search className="w-5 h-5 mr-3" />
+              Recherche Immo
+            </div>
           </div>
 
           <div

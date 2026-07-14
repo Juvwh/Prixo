@@ -1,0 +1,98 @@
+import React, { useState } from 'react';
+import { X, Search } from 'lucide-react';
+
+interface AddImmoSearchModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: { name: string; url: string; filterWord: string }) => void;
+}
+
+export function AddImmoSearchModal({ isOpen, onClose, onSubmit }: AddImmoSearchModalProps) {
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [filterWord, setFilterWord] = useState('');
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({ name, url, filterWord });
+    setName('');
+    setUrl('');
+    setFilterWord('');
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-[60]">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="flex justify-between items-center p-6 border-b border-gray-100">
+          <h2 className="text-xl font-bold text-[#212529] flex items-center">
+            <Search className="w-5 h-5 mr-2" />
+            Nouvelle Recherche
+          </h2>
+          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-[#212529] mb-1.5">Nom de la recherche</label>
+              <input
+                type="text"
+                required
+                placeholder="Ex: Paris 11ème, 2 pièces..."
+                className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#a8d5ba] focus:border-transparent transition-all text-sm"
+                value={name}
+                onChange={e => setName(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-[#212529] mb-1.5">URL de recherche</label>
+              <input
+                type="url"
+                required
+                placeholder="https://..."
+                className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#a8d5ba] focus:border-transparent transition-all text-sm"
+                value={url}
+                onChange={e => setUrl(e.target.value)}
+              />
+              <p className="text-xs text-[#6c757d] mt-1.5">Copiez l'URL avec tous vos filtres (prix, surface, etc.) appliqués sur le site immobilier.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-[#212529] mb-1.5">Filtre de lien (optionnel)</label>
+              <input
+                type="text"
+                placeholder="Ex: location, ad, annonce..."
+                className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#a8d5ba] focus:border-transparent transition-all text-sm"
+                value={filterWord}
+                onChange={e => setFilterWord(e.target.value)}
+              />
+              <p className="text-xs text-[#6c757d] mt-1.5">Le lien trouvé doit contenir ce mot pour être considéré comme une annonce. Utile pour éviter les liens parasites.</p>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-8">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-2.5 text-sm font-medium text-[#6c757d] hover:text-[#212529] hover:bg-gray-100 rounded-xl transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2.5 text-sm font-medium text-white bg-[#212529] hover:bg-black rounded-xl transition-colors shadow-md flex items-center"
+            >
+              Ajouter
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

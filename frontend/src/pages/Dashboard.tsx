@@ -9,6 +9,7 @@ import { EditPriceHistoryModal } from '../components/EditPriceHistoryModal';
 import { EditBoardModal } from '../components/EditBoardModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { BoardData } from '../components/Sidebar';
+import { ImmoSearch } from '../components/ImmoSearch';
 import Masonry from 'react-masonry-css';
 import { auth, db, functions } from '../firebase/config';
 import { signOut } from 'firebase/auth';
@@ -558,6 +559,7 @@ export function Dashboard() {
 
   const getPageTitle = () => {
     if (selectedBoardId === 'favorites') return "Coups de cœur";
+    if (selectedBoardId === 'immo_search') return "Recherche Immo";
     if (selectedBoardId) {
       const board = boardsData.find(b => b.id === selectedBoardId);
       return board ? board.name : "Tableau inconnu";
@@ -655,6 +657,10 @@ export function Dashboard() {
 
       <main className="flex-1 md:ml-64 p-4 sm:p-6 lg:p-8 pt-20 md:pt-8 pb-24 md:pb-8">
         <div className="max-w-7xl mx-auto">
+          {selectedBoardId === 'immo_search' ? (
+             <ImmoSearch />
+          ) : (
+             <>
           <header className="mb-8">
             <div className="flex items-center gap-4 mb-2">
               <h2 className="text-3xl font-bold text-[#212529] tracking-tight">{getPageTitle()}</h2>
@@ -867,6 +873,8 @@ export function Dashboard() {
               )}
             </Masonry>
           </SortableContext>
+             </>
+          )}
         </div>
       </main>
 
