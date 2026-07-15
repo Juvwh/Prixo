@@ -558,9 +558,39 @@ exports.refreshImmoSearchesV2 = functions
                 }
                 else {
                     updateData.lastError = null;
-                    updateData.links = links;
-                    const newAdditions = links.filter((l) => !oldLinks.includes(l));
-                    newLinksFound += newAdditions.length;
+                    // Convert old links to map for quick lookup
+                    const oldLinksMap = new Map();
+                    for (const item of oldLinks) {
+                        if (typeof item === 'string') {
+                            // Migrate old string arrays on the fly
+                            oldLinksMap.set(item, { url: item, isRead: false, isFavorite: false, addedAt: new Date().toISOString() });
+                        }
+                        else if (item && typeof item === 'object') {
+                            oldLinksMap.set(item.url, item);
+                        }
+                    }
+                    const updatedLinks = [];
+                    for (const urlStr of links) {
+                        if (oldLinksMap.has(urlStr)) {
+                            updatedLinks.push(oldLinksMap.get(urlStr));
+                        }
+                        else {
+                            updatedLinks.push({
+                                url: urlStr,
+                                isRead: false,
+                                isFavorite: false,
+                                addedAt: new Date().toISOString()
+                            });
+                            newLinksFound++;
+                        }
+                    }
+                    // Also preserve old links that weren't found in the current scrape if they are favorites, so users don't lose them
+                    for (const [urlStr, itemData] of oldLinksMap.entries()) {
+                        if (itemData.isFavorite && !links.includes(urlStr)) {
+                            updatedLinks.push(itemData);
+                        }
+                    }
+                    updateData.links = updatedLinks;
                 }
                 await docSnap.ref.update(updateData);
             }
@@ -612,17 +642,46 @@ exports.hourlyImmoScrape = functions
                 const { links, error } = await scrapeLinks(searchData.url, searchData.filterWord || '', browser || undefined);
                 if (!error && links.length > 0) {
                     const oldLinks = searchData.links || [];
-                    const newLinks = links.filter(l => !oldLinks.includes(l));
-                    if (newLinks.length > 0) {
+                    const oldLinksMap = new Map();
+                    for (const item of oldLinks) {
+                        if (typeof item === 'string') {
+                            oldLinksMap.set(item, { url: item, isRead: false, isFavorite: false, addedAt: new Date().toISOString() });
+                        }
+                        else if (item && typeof item === 'object') {
+                            oldLinksMap.set(item.url, item);
+                        }
+                    }
+                    const updatedLinks = [];
+                    const newLinksForAlert = [];
+                    for (const urlStr of links) {
+                        if (oldLinksMap.has(urlStr)) {
+                            updatedLinks.push(oldLinksMap.get(urlStr));
+                        }
+                        else {
+                            updatedLinks.push({
+                                url: urlStr,
+                                isRead: false,
+                                isFavorite: false,
+                                addedAt: new Date().toISOString()
+                            });
+                            newLinksForAlert.push(urlStr);
+                        }
+                    }
+                    for (const [urlStr, itemData] of oldLinksMap.entries()) {
+                        if (itemData.isFavorite && !links.includes(urlStr)) {
+                            updatedLinks.push(itemData);
+                        }
+                    }
+                    if (newLinksForAlert.length > 0) {
                         alerts.push({
                             searchName: searchData.name,
                             url: searchData.url,
-                            newLinks: newLinks,
+                            newLinks: newLinksForAlert,
                             groupId: searchData.groupId
                         });
                     }
                     await docSnap.ref.update({
-                        links: links,
+                        links: updatedLinks,
                         lastChecked: new Date().toISOString(),
                         lastError: null
                     });
