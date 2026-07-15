@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlusSquare, RefreshCw, Trash2, ExternalLink, Home } from 'lucide-react';
+import { PlusSquare, RefreshCw, Trash2, ExternalLink, Home, X } from 'lucide-react';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, where } from 'firebase/firestore';
 import { db, functions } from '../firebase/config';
 import { httpsCallable } from 'firebase/functions';
