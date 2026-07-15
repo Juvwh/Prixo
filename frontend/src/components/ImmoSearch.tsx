@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { PlusSquare, RefreshCw, Trash2, ExternalLink, Home, X, Heart, CheckCircle2, RotateCcw } from 'lucide-react';
+import { PlusSquare, RefreshCw, Trash2, ExternalLink, Home, X, Heart, CheckCircle2, RotateCcw, Edit2 } from 'lucide-react';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, where } from 'firebase/firestore';
 import { db, functions } from '../firebase/config';
 import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '../hooks/useAuth';
 import { AddImmoSearchModal } from './AddImmoSearchModal';
+import { EditImmoSearchModal } from './EditImmoSearchModal';
 
 interface ImmoLink {
   url: string;
@@ -31,6 +32,8 @@ export function ImmoSearch() {
   const { user } = useAuth();
   const [searches, setSearches] = useState<ImmoSearchDoc[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [searchToEdit, setSearchToEdit] = useState<ImmoSearchDoc | null>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isGlobalRefreshing, setIsGlobalRefreshing] = useState(false);
   const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
@@ -86,6 +89,19 @@ export function ImmoSearch() {
     } catch (err) {
       console.error(err);
       showNotification("Erreur lors de l'ajout", 'error');
+    }
+  };
+
+  const handleEditSearch = async (id: string, data: { name: string; url: string; filterWord: string }) => {
+    try {
+      await updateDoc(doc(db, 'immo_searches', id), data);
+      showNotification("Recherche modifiée avec succès", 'success');
+
+      const refreshImmoSearches = httpsCallable(functions, 'refreshImmoSearchesV2');
+      await refreshImmoSearches({ searchId: id });
+    } catch (err) {
+      console.error(err);
+      showNotification("Erreur lors de la modification", 'error');
     }
   };
 
@@ -328,9 +344,12 @@ export function ImmoSearch() {
                       <span className="text-[10px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full mt-2 inline-block">Filtre: {search.filterWord}</span>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-1 sm:gap-2">
                     <button onClick={() => handleRefresh(search.id)} className="p-1.5 text-gray-500 hover:text-[#212529] hover:bg-white rounded-md" title="Rafraîchir">
                       <RefreshCw className={`w-4 h-4 ${search.isScraping ? 'animate-spin' : ''}`} />
+                    </button>
+                    <button onClick={() => { setSearchToEdit(search); setIsEditModalOpen(true); }} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md" title="Modifier">
+                      <Edit2 className="w-4 h-4" />
                     </button>
                     <button onClick={() => handleDeleteSearch(search.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md" title="Supprimer">
                       <Trash2 className="w-4 h-4" />
@@ -395,6 +414,13 @@ export function ImmoSearch() {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onSubmit={handleAddSearch}
+      />
+
+      <EditImmoSearchModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onSubmit={handleEditSearch}
+        search={searchToEdit}
       />
     </div>
   );
