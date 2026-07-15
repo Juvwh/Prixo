@@ -511,7 +511,7 @@ async function scrapeLinks(url: string, filterWord: string, existingBrowser?: Br
   }
 }
 
-export const refreshImmoSearches = functions
+export const refreshImmoSearchesV2 = functions
   .region('europe-west1')
   .runWith({ memory: '2GB', timeoutSeconds: 540 })
   .https.onCall(async (data, context) => {
@@ -583,7 +583,7 @@ export const refreshImmoSearches = functions
 
       return { success: true, message: 'Actualisation terminée', newLinksCount: newLinksFound };
     } catch (e: any) {
-      console.error("Erreur critique dans refreshImmoSearches:", e);
+      console.error("Erreur critique dans refreshImmoSearchesV2:", e);
       if (e instanceof functions.https.HttpsError) throw e;
       throw new functions.https.HttpsError('internal', 'Erreur interne au serveur lors du rafraîchissement.', e.message);
     }
@@ -891,7 +891,7 @@ export const nightlyScrape = functions
     return null;
 });
 
-export const testEmailNotification = functions
+export const testEmailNotificationV2 = functions
   .region('europe-west1')
   .runWith({
     memory: '256MB',
@@ -973,7 +973,7 @@ export const testEmailNotification = functions
     }
   });
 
-export const migrateToGroupA = functions
+export const migrateToGroupAV2 = functions
   .region('europe-west1')
   .https.onRequest(async (req, res) => {
     try {
