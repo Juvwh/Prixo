@@ -235,21 +235,26 @@ export function ImmoSearch() {
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {allUnreadLinks.map((item, idx) => (
-              <div key={idx} className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm flex flex-col hover:shadow-md transition-shadow">
-                 <div className="text-xs text-gray-500 mb-1">{item.searchName}</div>
-                 <a href={item.link.url} target="_blank" rel="noopener noreferrer" onClick={() => handleMarkAsRead(item.searchId, item.link.url)} className="text-sm font-medium text-[#212529] hover:text-blue-600 line-clamp-2 break-all mb-3">
+              <div key={idx} className="bg-white p-5 rounded-xl border border-blue-100 shadow-sm flex flex-col hover:shadow-md transition-shadow">
+                 <div className="flex justify-between items-start mb-2">
+                    <div className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded-md">{item.searchName}</div>
+                    <span className="text-xs text-gray-400">{new Date(item.link.addedAt).toLocaleDateString('fr-FR')}</span>
+                 </div>
+
+                 <a href={item.link.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-[#212529] hover:text-blue-600 line-clamp-3 break-all mb-4 mt-2">
                     {item.link.url}
                  </a>
-                 <div className="mt-auto flex justify-between items-center border-t border-gray-100 pt-3">
-                    <span className="text-xs text-gray-400">{new Date(item.link.addedAt).toLocaleDateString('fr-FR')}</span>
-                    <div className="flex gap-2">
-                       <button onClick={() => handleMarkAsRead(item.searchId, item.link.url)} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded" title="Marquer comme lu">
-                          Lu
-                       </button>
-                       <button onClick={() => handleToggleFavorite(item.searchId, item.link.url)} className="text-xs bg-red-50 hover:bg-red-100 text-red-500 px-2 py-1 rounded flex items-center" title="Ajouter aux favoris">
-                          <Heart className="w-3.5 h-3.5" />
-                       </button>
-                    </div>
+
+                 <div className="mt-auto grid grid-cols-3 gap-2 border-t border-gray-100 pt-3">
+                    <button onClick={() => handleToggleFavorite(item.searchId, item.link.url)} className="flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-500 py-2 rounded-lg font-medium transition-colors" title="Ajouter aux favoris">
+                       <Heart className="w-4 h-4 mr-1.5" /> Favoris
+                    </button>
+                    <button onClick={() => handleMarkAsRead(item.searchId, item.link.url)} className="flex items-center justify-center text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg font-medium transition-colors" title="Garder dans l'historique">
+                       <CheckCircle2 className="w-4 h-4 mr-1.5" /> Garder
+                    </button>
+                    <button onClick={() => handleDeleteLink(item.searchId, item.link.url)} className="flex items-center justify-center text-xs bg-white border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-gray-500 py-2 rounded-lg font-medium transition-colors" title="Ignorer et supprimer">
+                       <Trash2 className="w-4 h-4 mr-1.5" /> Ignorer
+                    </button>
                  </div>
               </div>
             ))}
@@ -325,12 +330,17 @@ export function ImmoSearch() {
                       return (
                         <li key={idx} className="flex items-center justify-between group text-sm">
                           <div className="flex-1 min-w-0 flex items-center gap-2">
-                             <a href={linkObj.url} onClick={() => handleMarkAsRead(search.id, linkObj.url)} target="_blank" rel="noopener noreferrer" className={`hover:text-blue-600 hover:underline truncate pr-2 ${linkObj.isRead ? 'text-gray-400' : 'text-[#212529] font-medium'}`}>
+                             <a href={linkObj.url} target="_blank" rel="noopener noreferrer" className={`hover:text-blue-600 hover:underline truncate pr-2 ${linkObj.isRead ? 'text-gray-400' : 'text-[#212529] font-medium'}`}>
                                Bien #{idx + 1}
                              </a>
                              {linkObj.isFavorite && <Heart className="w-3 h-3 text-red-500 fill-current shrink-0" />}
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                             {!linkObj.isRead && (
+                               <button onClick={() => handleMarkAsRead(search.id, linkObj.url)} className="text-gray-400 hover:text-green-500 p-1" title="Marquer comme lu">
+                                 <CheckCircle2 className="w-4 h-4" />
+                               </button>
+                             )}
                              <button onClick={() => handleToggleFavorite(search.id, linkObj.url)} className="text-gray-400 hover:text-red-500 p-1" title="Favori">
                                <Heart className="w-4 h-4" />
                              </button>
