@@ -575,7 +575,7 @@ exports.refreshImmoSearches = functions
         console.error("Erreur critique dans refreshImmoSearches:", e);
         if (e instanceof functions.https.HttpsError)
             throw e;
-        throw new functions.https.HttpsError('internal', 'Erreur interne au serveur.', e.message);
+        throw new functions.https.HttpsError('internal', 'Erreur interne au serveur lors du rafraîchissement.', e.message);
     }
 });
 exports.hourlyImmoScrape = functions
