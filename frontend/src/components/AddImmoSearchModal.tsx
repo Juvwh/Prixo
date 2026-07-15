@@ -64,15 +64,15 @@ export function AddImmoSearchModal({ isOpen, onClose, onSubmit }: AddImmoSearchM
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-[#212529] mb-1.5">Filtre de lien (optionnel)</label>
+              <label className="block text-sm font-semibold text-[#212529] mb-1.5">Filtres de lien (optionnel)</label>
               <input
                 type="text"
-                placeholder="Ex: location, ad, annonce..."
+                placeholder="Ex: location, annonce, ad..."
                 className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#a8d5ba] focus:border-transparent transition-all text-sm"
                 value={filterWord}
                 onChange={e => setFilterWord(e.target.value)}
               />
-              <p className="text-xs text-[#6c757d] mt-1.5">Le lien trouvé doit contenir ce mot pour être considéré comme une annonce. Utile pour éviter les liens parasites.</p>
+              <p className="text-xs text-[#6c757d] mt-1.5">Séparez les mots par des virgules (ex: <em>location, appartement</em>). Le lien doit contenir <strong>tous</strong> ces mots pour être conservé. Utile pour filtrer les résultats avec précision.</p>
             </div>
           </div>
 
