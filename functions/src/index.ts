@@ -515,73 +515,78 @@ export const refreshImmoSearches = functions
   .region('europe-west1')
   .runWith({ memory: '2GB', timeoutSeconds: 540 })
   .https.onCall(async (data, context) => {
-    if (!context.auth) {
-      throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
-    }
-
-    const userDoc = await db.collection('users').doc(context.auth.uid).get();
-    const userGroupId = userDoc.data()?.groupId;
-    if (!userGroupId) {
-      throw new functions.https.HttpsError('failed-precondition', 'User has no groupId assigned.');
-    }
-
-    const { searchId } = data;
-
-    let queryRef = db.collection('immo_searches').where('groupId', '==', userGroupId);
-    if (searchId) {
-      queryRef = queryRef.where(admin.firestore.FieldPath.documentId(), '==', searchId);
-    }
-
-    const snapshot = await queryRef.get();
-    if (snapshot.empty) {
-       return { success: true, message: 'Aucune recherche trouvée.' };
-    }
-
-    let browser: Browser | null = null;
     try {
-      browser = await puppeteer.launch({
-        args: chromium.args,
-        defaultViewport: { width: 1920, height: 1080 } as any,
-        executablePath: await chromium.executablePath(),
-        headless: true,
-      });
-    } catch (err) {
-      console.error("Failed to launch browser:", err);
-      throw new functions.https.HttpsError('internal', 'Failed to launch browser.');
-    }
-
-    let newLinksFound = 0;
-    try {
-      for (const docSnap of snapshot.docs) {
-        const searchData = docSnap.data();
-        await docSnap.ref.update({ isScraping: true, lastChecked: new Date().toISOString() });
-
-        const { links, error } = await scrapeLinks(searchData.url, searchData.filterWord || '', browser);
-
-        const oldLinks = searchData.links || [];
-        // Only keep links from the new scrape, adding them to old links if they weren't there (we don't delete old manually kept ones during refresh from the user's perspective, but actually wait, the prompt specified: "retirer les biens qui ne sont plus disponible (soit lorsque on rescrappe et que le système remarque que le bien a été retiré)". So we will completely replace the links list with the newly scraped one.
-
-        const updateData: any = {
-           isScraping: false,
-           lastChecked: new Date().toISOString()
-        };
-
-        if (error) {
-           updateData.lastError = error;
-        } else {
-           updateData.lastError = null;
-           updateData.links = links;
-           const newAdditions = links.filter((l: string) => !oldLinks.includes(l));
-           newLinksFound += newAdditions.length;
-        }
-
-        await docSnap.ref.update(updateData);
+      if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
       }
-    } finally {
-      if (browser) await browser.close().catch(() => {});
-    }
 
-    return { success: true, message: 'Actualisation terminée', newLinksCount: newLinksFound };
+      const userDoc = await db.collection('users').doc(context.auth.uid).get();
+      const userGroupId = userDoc.data()?.groupId;
+      if (!userGroupId) {
+        throw new functions.https.HttpsError('failed-precondition', 'User has no groupId assigned.');
+      }
+
+      const { searchId } = data;
+
+      let queryRef = db.collection('immo_searches').where('groupId', '==', userGroupId);
+      if (searchId) {
+        queryRef = queryRef.where(admin.firestore.FieldPath.documentId(), '==', searchId);
+      }
+
+      const snapshot = await queryRef.get();
+      if (snapshot.empty) {
+         return { success: true, message: 'Aucune recherche trouvée.' };
+      }
+
+      let browser: Browser | null = null;
+      try {
+        browser = await puppeteer.launch({
+          args: chromium.args,
+          defaultViewport: { width: 1920, height: 1080 } as any,
+          executablePath: await chromium.executablePath(),
+          headless: true,
+        });
+      } catch (err) {
+        console.error("Failed to launch browser:", err);
+        throw new functions.https.HttpsError('internal', 'Impossible de lancer le navigateur (vérifiez la RAM sur GCP).');
+      }
+
+      let newLinksFound = 0;
+      try {
+        for (const docSnap of snapshot.docs) {
+          const searchData = docSnap.data();
+          await docSnap.ref.update({ isScraping: true, lastChecked: new Date().toISOString() });
+
+          const { links, error } = await scrapeLinks(searchData.url, searchData.filterWord || '', browser);
+
+          const oldLinks = searchData.links || [];
+
+          const updateData: any = {
+             isScraping: false,
+             lastChecked: new Date().toISOString()
+          };
+
+          if (error) {
+             updateData.lastError = error;
+          } else {
+             updateData.lastError = null;
+             updateData.links = links;
+             const newAdditions = links.filter((l: string) => !oldLinks.includes(l));
+             newLinksFound += newAdditions.length;
+          }
+
+          await docSnap.ref.update(updateData);
+        }
+      } finally {
+        if (browser) await browser.close().catch(() => {});
+      }
+
+      return { success: true, message: 'Actualisation terminée', newLinksCount: newLinksFound };
+    } catch (e: any) {
+      console.error("Erreur critique dans refreshImmoSearches:", e);
+      if (e instanceof functions.https.HttpsError) throw e;
+      throw new functions.https.HttpsError('internal', 'Erreur interne au serveur.', e.message);
+    }
   });
 
 export const hourlyImmoScrape = functions
