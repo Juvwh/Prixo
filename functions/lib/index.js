@@ -489,7 +489,13 @@ async function scrapeLinks(url, filterWord, existingBrowser) {
             const uniqueLinks = Array.from(new Set(absoluteLinks));
             if (!filter)
                 return uniqueLinks;
-            return uniqueLinks.filter(l => l.toLowerCase().includes(filter.toLowerCase()));
+            const filterWords = filter.split(',').map((w) => w.trim().toLowerCase()).filter(Boolean);
+            if (filterWords.length === 0)
+                return uniqueLinks;
+            return uniqueLinks.filter(l => {
+                const lowerLink = l.toLowerCase();
+                return filterWords.every((word) => lowerLink.includes(word));
+            });
         }, filterWord || '', baseUrl);
         return { links: extractedLinks, error: null };
     }
@@ -563,7 +569,7 @@ exports.refreshImmoSearchesV2 = functions
                     for (const item of oldLinks) {
                         if (typeof item === 'string') {
                             // Migrate old string arrays on the fly
-                            oldLinksMap.set(item, { url: item, isRead: false, isFavorite: false, addedAt: new Date().toISOString() });
+                            oldLinksMap.set(item, { url: item, isRead: false, isFavorite: false, isIgnored: false, addedAt: new Date().toISOString() });
                         }
                         else if (item && typeof item === 'object') {
                             oldLinksMap.set(item.url, item);
@@ -579,14 +585,15 @@ exports.refreshImmoSearchesV2 = functions
                                 url: urlStr,
                                 isRead: false,
                                 isFavorite: false,
+                                isIgnored: false,
                                 addedAt: new Date().toISOString()
                             });
                             newLinksFound++;
                         }
                     }
-                    // Also preserve old links that weren't found in the current scrape if they are favorites, so users don't lose them
+                    // Also preserve old links that weren't found in the current scrape if they are favorites or ignored, so users don't lose them
                     for (const [urlStr, itemData] of oldLinksMap.entries()) {
-                        if (itemData.isFavorite && !links.includes(urlStr)) {
+                        if ((itemData.isFavorite || itemData.isIgnored) && !links.includes(urlStr)) {
                             updatedLinks.push(itemData);
                         }
                     }
@@ -645,7 +652,7 @@ exports.hourlyImmoScrape = functions
                     const oldLinksMap = new Map();
                     for (const item of oldLinks) {
                         if (typeof item === 'string') {
-                            oldLinksMap.set(item, { url: item, isRead: false, isFavorite: false, addedAt: new Date().toISOString() });
+                            oldLinksMap.set(item, { url: item, isRead: false, isFavorite: false, isIgnored: false, addedAt: new Date().toISOString() });
                         }
                         else if (item && typeof item === 'object') {
                             oldLinksMap.set(item.url, item);
@@ -662,13 +669,14 @@ exports.hourlyImmoScrape = functions
                                 url: urlStr,
                                 isRead: false,
                                 isFavorite: false,
+                                isIgnored: false,
                                 addedAt: new Date().toISOString()
                             });
                             newLinksForAlert.push(urlStr);
                         }
                     }
                     for (const [urlStr, itemData] of oldLinksMap.entries()) {
-                        if (itemData.isFavorite && !links.includes(urlStr)) {
+                        if ((itemData.isFavorite || itemData.isIgnored) && !links.includes(urlStr)) {
                             updatedLinks.push(itemData);
                         }
                     }

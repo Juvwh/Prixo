@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlusSquare, RefreshCw, Trash2, ExternalLink, Home, X, Heart, CheckCircle2 } from 'lucide-react';
+import { PlusSquare, RefreshCw, Trash2, ExternalLink, Home, X, Heart, CheckCircle2, RotateCcw } from 'lucide-react';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, where } from 'firebase/firestore';
 import { db, functions } from '../firebase/config';
 import { httpsCallable } from 'firebase/functions';
@@ -10,6 +10,7 @@ interface ImmoLink {
   url: string;
   isRead: boolean;
   isFavorite: boolean;
+  isIgnored?: boolean;
   addedAt: string;
 }
 
@@ -98,13 +99,33 @@ export function ImmoSearch() {
     }
   };
 
-  const handleDeleteLink = async (searchId: string, linkUrlToRemove: string) => {
+  const handleIgnoreLink = async (searchId: string, linkUrl: string) => {
     try {
       const search = searches.find(s => s.id === searchId);
       if (search) {
-        const newLinks = search.links.filter(l => {
-           if (typeof l === 'string') return l !== linkUrlToRemove;
-           return l.url !== linkUrlToRemove;
+        const newLinks = search.links.map(l => {
+           if (typeof l === 'string') {
+              if (l === linkUrl) return { url: l, isRead: true, isFavorite: false, isIgnored: true, addedAt: new Date().toISOString() };
+              return l;
+           }
+           if (l.url === linkUrl) return { ...l, isRead: true, isFavorite: false, isIgnored: true };
+           return l;
+        });
+        await updateDoc(doc(db, 'immo_searches', searchId), { links: newLinks });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRestoreLink = async (searchId: string, linkUrl: string) => {
+    try {
+      const search = searches.find(s => s.id === searchId);
+      if (search) {
+        const newLinks = search.links.map(l => {
+           if (typeof l === 'string') return l;
+           if (l.url === linkUrl) return { ...l, isIgnored: false, isRead: false };
+           return l;
         });
         await updateDoc(doc(db, 'immo_searches', searchId), { links: newLinks });
       }
@@ -157,11 +178,11 @@ export function ImmoSearch() {
 
   searches.forEach(search => {
      search.links.forEach(l => {
-        const linkObj = typeof l === 'string' ? { url: l, isRead: false, isFavorite: false, addedAt: new Date().toISOString() } : l;
-        if (!linkObj.isRead && !linkObj.isFavorite) {
+        const linkObj = typeof l === 'string' ? { url: l, isRead: false, isFavorite: false, isIgnored: false, addedAt: new Date().toISOString() } : l;
+        if (!linkObj.isRead && !linkObj.isFavorite && !linkObj.isIgnored) {
            allUnreadLinks.push({ searchId: search.id, searchName: search.name, link: linkObj });
         }
-        if (linkObj.isFavorite) {
+        if (linkObj.isFavorite && !linkObj.isIgnored) {
            allFavoriteLinks.push({ searchId: search.id, searchName: search.name, link: linkObj });
         }
      });
@@ -252,7 +273,7 @@ export function ImmoSearch() {
                     <button onClick={() => handleMarkAsRead(item.searchId, item.link.url)} className="flex items-center justify-center text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg font-medium transition-colors" title="Garder dans l'historique">
                        <CheckCircle2 className="w-4 h-4 mr-1.5" /> Garder
                     </button>
-                    <button onClick={() => handleDeleteLink(item.searchId, item.link.url)} className="flex items-center justify-center text-xs bg-white border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-gray-500 py-2 rounded-lg font-medium transition-colors" title="Ignorer et supprimer">
+                    <button onClick={() => handleIgnoreLink(item.searchId, item.link.url)} className="flex items-center justify-center text-xs bg-white border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-gray-500 py-2 rounded-lg font-medium transition-colors" title="Ignorer définitivement">
                        <Trash2 className="w-4 h-4 mr-1.5" /> Ignorer
                     </button>
                  </div>
@@ -326,27 +347,35 @@ export function ImmoSearch() {
                   </div>
                   <ul className="space-y-2">
                     {search.links.map((l, idx) => {
-                      const linkObj = typeof l === 'string' ? { url: l, isRead: false, isFavorite: false } : l;
+                      const linkObj = typeof l === 'string' ? { url: l, isRead: false, isFavorite: false, isIgnored: false } : l;
                       return (
-                        <li key={idx} className="flex items-center justify-between group text-sm">
+                        <li key={idx} className={`flex items-center justify-between group text-sm ${linkObj.isIgnored ? 'opacity-50' : ''}`}>
                           <div className="flex-1 min-w-0 flex items-center gap-2">
-                             <a href={linkObj.url} target="_blank" rel="noopener noreferrer" className={`hover:text-blue-600 hover:underline truncate pr-2 ${linkObj.isRead ? 'text-gray-400' : 'text-[#212529] font-medium'}`}>
+                             <a href={linkObj.url} target="_blank" rel="noopener noreferrer" className={`hover:text-blue-600 hover:underline truncate pr-2 ${linkObj.isIgnored ? 'text-gray-400 line-through' : linkObj.isRead ? 'text-gray-500' : 'text-[#212529] font-medium'}`}>
                                Bien #{idx + 1}
                              </a>
-                             {linkObj.isFavorite && <Heart className="w-3 h-3 text-red-500 fill-current shrink-0" />}
+                             {linkObj.isFavorite && !linkObj.isIgnored && <Heart className="w-3 h-3 text-red-500 fill-current shrink-0" />}
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                             {!linkObj.isRead && (
-                               <button onClick={() => handleMarkAsRead(search.id, linkObj.url)} className="text-gray-400 hover:text-green-500 p-1" title="Marquer comme lu">
-                                 <CheckCircle2 className="w-4 h-4" />
+                             {linkObj.isIgnored ? (
+                               <button onClick={() => handleRestoreLink(search.id, linkObj.url)} className="text-gray-400 hover:text-blue-500 p-1 flex items-center" title="Restaurer">
+                                 <RotateCcw className="w-3.5 h-3.5" />
                                </button>
+                             ) : (
+                               <>
+                                 {!linkObj.isRead && (
+                                   <button onClick={() => handleMarkAsRead(search.id, linkObj.url)} className="text-gray-400 hover:text-green-500 p-1" title="Marquer comme lu">
+                                     <CheckCircle2 className="w-4 h-4" />
+                                   </button>
+                                 )}
+                                 <button onClick={() => handleToggleFavorite(search.id, linkObj.url)} className="text-gray-400 hover:text-red-500 p-1" title="Favori">
+                                   <Heart className="w-4 h-4" />
+                                 </button>
+                                 <button onClick={() => handleIgnoreLink(search.id, linkObj.url)} className="text-gray-400 hover:text-red-500 p-1" title="Ignorer">
+                                   <X className="w-4 h-4" />
+                                 </button>
+                               </>
                              )}
-                             <button onClick={() => handleToggleFavorite(search.id, linkObj.url)} className="text-gray-400 hover:text-red-500 p-1" title="Favori">
-                               <Heart className="w-4 h-4" />
-                             </button>
-                             <button onClick={() => handleDeleteLink(search.id, linkObj.url)} className="text-gray-400 hover:text-red-500 p-1" title="Supprimer">
-                               <X className="w-4 h-4" />
-                             </button>
                           </div>
                         </li>
                       );
