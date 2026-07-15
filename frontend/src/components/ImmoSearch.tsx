@@ -68,7 +68,7 @@ export function ImmoSearch() {
       });
 
       try {
-        const refreshImmoSearches = httpsCallable(functions, 'refreshImmoSearches');
+        const refreshImmoSearches = httpsCallable(functions, 'refreshImmoSearchesV2');
         await refreshImmoSearches({ searchId: docRef.id });
       } catch (err) {
         console.error("Error refreshing new search: ", err);
@@ -106,7 +106,7 @@ export function ImmoSearch() {
   const handleRefresh = async (searchId?: string) => {
     if (!searchId) setIsGlobalRefreshing(true);
     try {
-      const refreshImmoSearches = httpsCallable(functions, 'refreshImmoSearches');
+      const refreshImmoSearches = httpsCallable(functions, 'refreshImmoSearchesV2');
       const result = await refreshImmoSearches({ searchId });
       const data = result.data as any;
       if (data.success) {

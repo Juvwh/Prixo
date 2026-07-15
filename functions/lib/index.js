@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.migrateToGroupA = exports.testEmailNotification = exports.nightlyScrape = exports.hourlyImmoScrape = exports.refreshImmoSearches = exports.refreshItemPrice = exports.refreshBoardItemsPrice = void 0;
+exports.migrateToGroupAV2 = exports.testEmailNotificationV2 = exports.nightlyScrape = exports.hourlyImmoScrape = exports.refreshImmoSearchesV2 = exports.refreshItemPrice = exports.refreshBoardItemsPrice = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
 const puppeteer_core_1 = __importDefault(require("puppeteer-core"));
@@ -507,7 +507,7 @@ async function scrapeLinks(url, filterWord, existingBrowser) {
             await browser.close().catch(() => { });
     }
 }
-exports.refreshImmoSearches = functions
+exports.refreshImmoSearchesV2 = functions
     .region('europe-west1')
     .runWith({ memory: '2GB', timeoutSeconds: 540 })
     .https.onCall(async (data, context) => {
@@ -572,7 +572,7 @@ exports.refreshImmoSearches = functions
         return { success: true, message: 'Actualisation terminée', newLinksCount: newLinksFound };
     }
     catch (e) {
-        console.error("Erreur critique dans refreshImmoSearches:", e);
+        console.error("Erreur critique dans refreshImmoSearchesV2:", e);
         if (e instanceof functions.https.HttpsError)
             throw e;
         throw new functions.https.HttpsError('internal', 'Erreur interne au serveur lors du rafraîchissement.', e.message);
@@ -839,7 +839,7 @@ exports.nightlyScrape = functions
     }
     return null;
 });
-exports.testEmailNotification = functions
+exports.testEmailNotificationV2 = functions
     .region('europe-west1')
     .runWith({
     memory: '256MB',
@@ -914,7 +914,7 @@ exports.testEmailNotification = functions
         throw new functions.https.HttpsError('internal', "Erreur lors de l'envoi de l'email.");
     }
 });
-exports.migrateToGroupA = functions
+exports.migrateToGroupAV2 = functions
     .region('europe-west1')
     .https.onRequest(async (req, res) => {
     try {

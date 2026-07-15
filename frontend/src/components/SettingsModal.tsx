@@ -18,7 +18,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     setErrorMessage(null);
 
     try {
-      const testEmailFunction = httpsCallable(functions, 'testEmailNotification');
+      const testEmailNotification = httpsCallable(functions, 'testEmailNotificationV2');
       const result = await testEmailFunction();
       setSuccessMessage((result.data as any).message || 'Email de test envoyé avec succès !');
     } catch (error: any) {
