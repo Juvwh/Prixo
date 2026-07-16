@@ -484,6 +484,15 @@ async function scrapeLinks(url: string, filterWord: string, existingBrowser?: Br
       const anchors = Array.from(document.querySelectorAll('a'));
       const hrefs = anchors.map(a => a.getAttribute('href')).filter(Boolean) as string[];
 
+      // Odoo / Aryes specific: Some listings use data-building-id instead of standard links
+      const buildingElements = Array.from(document.querySelectorAll('[data-building-id]'));
+      buildingElements.forEach(el => {
+         const buildingId = el.getAttribute('data-building-id');
+         if (buildingId) {
+            hrefs.push('/buildings/' + buildingId);
+         }
+      });
+
       const absoluteLinks = hrefs.map(href => {
         try {
            return new URL(href, base).href;
