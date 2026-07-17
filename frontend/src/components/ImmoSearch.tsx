@@ -37,6 +37,7 @@ export function ImmoSearch() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isGlobalRefreshing, setIsGlobalRefreshing] = useState(false);
   const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const [showIgnored, setShowIgnored] = useState(false);
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setNotification({ message, type });
@@ -188,24 +189,35 @@ export function ImmoSearch() {
     }
   };
 
-  // Derive global unread and favorites for the dashboard header sections
+  // Derive global aggregated links
   const allUnreadLinks: { searchId: string, searchName: string, link: ImmoLink }[] = [];
   const allFavoriteLinks: { searchId: string, searchName: string, link: ImmoLink }[] = [];
+  const allKeptLinks: { searchId: string, searchName: string, link: ImmoLink }[] = [];
+  const allIgnoredLinks: { searchId: string, searchName: string, link: ImmoLink }[] = [];
 
   searches.forEach(search => {
      search.links.forEach(l => {
         const linkObj = typeof l === 'string' ? { url: l, isRead: false, isFavorite: false, isIgnored: false, addedAt: new Date().toISOString() } : l;
-        if (!linkObj.isRead && !linkObj.isFavorite && !linkObj.isIgnored) {
-           allUnreadLinks.push({ searchId: search.id, searchName: search.name, link: linkObj });
-        }
-        if (linkObj.isFavorite && !linkObj.isIgnored) {
+
+        if (linkObj.isIgnored) {
+           allIgnoredLinks.push({ searchId: search.id, searchName: search.name, link: linkObj });
+        } else if (linkObj.isFavorite) {
            allFavoriteLinks.push({ searchId: search.id, searchName: search.name, link: linkObj });
+        } else if (linkObj.isRead) {
+           allKeptLinks.push({ searchId: search.id, searchName: search.name, link: linkObj });
+        } else {
+           allUnreadLinks.push({ searchId: search.id, searchName: search.name, link: linkObj });
         }
      });
   });
 
   allUnreadLinks.sort((a, b) => new Date(b.link.addedAt).getTime() - new Date(a.link.addedAt).getTime());
   allFavoriteLinks.sort((a, b) => new Date(b.link.addedAt).getTime() - new Date(a.link.addedAt).getTime());
+  allKeptLinks.sort((a, b) => new Date(b.link.addedAt).getTime() - new Date(a.link.addedAt).getTime());
+  allIgnoredLinks.sort((a, b) => new Date(b.link.addedAt).getTime() - new Date(a.link.addedAt).getTime());
+
+  // Combined list for the right column: favorites first, then kept items
+  const favoritesAndKeptLinks = [...allFavoriteLinks, ...allKeptLinks];
 
 
   const handleRefresh = async (searchId?: string) => {
@@ -265,62 +277,137 @@ export function ImmoSearch() {
         </div>
       </div>
 
-      {allUnreadLinks.length > 0 && (
-        <div className="mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        {/* Left column: Unread Links */}
+        <div>
           <h3 className="text-xl font-bold text-[#212529] mb-4 flex items-center">
             <CheckCircle2 className="w-5 h-5 text-blue-500 mr-2" /> Nouveaux biens ({allUnreadLinks.length})
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {allUnreadLinks.map((item, idx) => (
-              <div key={idx} className="bg-white p-5 rounded-xl border border-blue-100 shadow-sm flex flex-col hover:shadow-md transition-shadow">
-                 <div className="flex justify-between items-start mb-2">
-                    <div className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded-md">{item.searchName}</div>
-                    <span className="text-xs text-gray-400">{new Date(item.link.addedAt).toLocaleDateString('fr-FR')}</span>
-                 </div>
+          {allUnreadLinks.length > 0 ? (
+            <div className="space-y-3">
+              {allUnreadLinks.map((item, idx) => (
+                <div key={idx} className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm flex flex-col hover:shadow-md transition-shadow">
+                   <div className="flex justify-between items-center mb-2 gap-2">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <span className="text-sm font-bold text-[#212529] whitespace-nowrap">Bien #{idx + 1}</span>
+                        <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full truncate">{item.searchName}</span>
+                      </div>
+                      <span className="text-[10px] text-gray-400 whitespace-nowrap">{new Date(item.link.addedAt).toLocaleDateString('fr-FR')}</span>
+                   </div>
 
-                 <a href={item.link.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-[#212529] hover:text-blue-600 line-clamp-3 break-all mb-4 mt-2">
-                    {item.link.url}
-                 </a>
+                   <a href={item.link.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-600 hover:text-blue-600 truncate mb-3">
+                      {item.link.url}
+                   </a>
 
-                 <div className="mt-auto grid grid-cols-3 gap-2 border-t border-gray-100 pt-3">
-                    <button onClick={() => handleToggleFavorite(item.searchId, item.link.url)} className="flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-500 py-2 rounded-lg font-medium transition-colors" title="Ajouter aux favoris">
-                       <Heart className="w-4 h-4 mr-1.5" /> Favoris
-                    </button>
-                    <button onClick={() => handleMarkAsRead(item.searchId, item.link.url)} className="flex items-center justify-center text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg font-medium transition-colors" title="Garder dans l'historique">
-                       <CheckCircle2 className="w-4 h-4 mr-1.5" /> Garder
-                    </button>
-                    <button onClick={() => handleIgnoreLink(item.searchId, item.link.url)} className="flex items-center justify-center text-xs bg-white border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-gray-500 py-2 rounded-lg font-medium transition-colors" title="Ignorer définitivement">
-                       <Trash2 className="w-4 h-4 mr-1.5" /> Ignorer
-                    </button>
-                 </div>
-              </div>
-            ))}
-          </div>
+                   <div className="flex items-center gap-2 mt-auto">
+                      <button onClick={() => handleToggleFavorite(item.searchId, item.link.url)} className="flex-1 flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-500 py-1.5 rounded-lg font-medium transition-colors" title="Ajouter aux favoris">
+                         <Heart className="w-3.5 h-3.5 mr-1" /> Favoris
+                      </button>
+                      <button onClick={() => handleMarkAsRead(item.searchId, item.link.url)} className="flex-1 flex items-center justify-center text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 py-1.5 rounded-lg font-medium transition-colors" title="Garder dans l'historique">
+                         <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Garder
+                      </button>
+                      <button onClick={() => handleIgnoreLink(item.searchId, item.link.url)} className="flex-1 flex items-center justify-center text-xs bg-white border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-gray-500 py-1.5 rounded-lg font-medium transition-colors" title="Ignorer définitivement">
+                         <X className="w-3.5 h-3.5 mr-1" /> Ignorer
+                      </button>
+                   </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500 italic p-4 bg-gray-50 rounded-xl border border-gray-100">
+              Aucun nouveau bien pour le moment.
+            </div>
+          )}
         </div>
-      )}
 
-      {allFavoriteLinks.length > 0 && (
-        <div className="mb-8">
+        {/* Right column: Favorites and Kept Links */}
+        <div>
           <h3 className="text-xl font-bold text-[#212529] mb-4 flex items-center">
-            <Heart className="w-5 h-5 text-red-500 mr-2 fill-current" /> Vos favoris ({allFavoriteLinks.length})
+            <Heart className="w-5 h-5 text-red-500 mr-2 fill-current" /> Favoris & Gardés ({favoritesAndKeptLinks.length})
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {allFavoriteLinks.map((item, idx) => (
-              <div key={idx} className="bg-red-50 p-4 rounded-xl border border-red-100 shadow-sm flex flex-col">
-                 <div className="text-xs text-gray-500 mb-1">{item.searchName}</div>
-                 <a href={item.link.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-[#212529] hover:text-red-600 line-clamp-2 break-all mb-3">
+          {favoritesAndKeptLinks.length > 0 ? (
+            <div className="space-y-3">
+              {favoritesAndKeptLinks.map((item, idx) => (
+                <div key={idx} className={`p-4 rounded-xl border shadow-sm flex flex-col ${item.link.isFavorite ? 'bg-red-50 border-red-100' : 'bg-white border-gray-200'}`}>
+                   <div className="flex justify-between items-center mb-2 gap-2">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <span className="text-sm font-bold text-[#212529] whitespace-nowrap">Bien #{idx + 1}</span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full truncate ${item.link.isFavorite ? 'text-red-600 bg-red-100' : 'text-gray-600 bg-gray-100'}`}>{item.searchName}</span>
+                      </div>
+                      <span className="text-[10px] text-gray-400 whitespace-nowrap">{new Date(item.link.addedAt).toLocaleDateString('fr-FR')}</span>
+                   </div>
+
+                   <a href={item.link.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-600 hover:text-blue-600 truncate mb-3">
+                      {item.link.url}
+                   </a>
+
+                   <div className="flex items-center gap-2 mt-auto justify-end">
+                      {item.link.isFavorite ? (
+                        <button onClick={() => handleToggleFavorite(item.searchId, item.link.url)} className="flex items-center text-xs bg-white border border-red-200 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg font-medium transition-colors" title="Retirer des favoris">
+                           <Heart className="w-3.5 h-3.5 mr-1 fill-current" /> Retirer des favoris
+                        </button>
+                      ) : (
+                        <button onClick={() => handleToggleFavorite(item.searchId, item.link.url)} className="flex items-center text-xs bg-red-50 hover:bg-red-100 text-red-500 px-3 py-1.5 rounded-lg font-medium transition-colors" title="Ajouter aux favoris">
+                           <Heart className="w-3.5 h-3.5 mr-1" /> Favoris
+                        </button>
+                      )}
+                      <button onClick={() => handleIgnoreLink(item.searchId, item.link.url)} className="flex items-center text-xs bg-white border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-gray-500 px-3 py-1.5 rounded-lg font-medium transition-colors" title="Ignorer">
+                         <X className="w-3.5 h-3.5 mr-1" /> Ignorer
+                      </button>
+                   </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500 italic p-4 bg-gray-50 rounded-xl border border-gray-100">
+              Aucun bien favori ou gardé.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Ignored Links Section */}
+      <div className="mb-12 border-t border-gray-200 pt-8">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-[#212529] flex items-center">
+            <Trash2 className="w-5 h-5 text-gray-500 mr-2" /> Logements ignorés ({allIgnoredLinks.length})
+          </h3>
+          {allIgnoredLinks.length > 0 && (
+            <button
+              onClick={() => setShowIgnored(!showIgnored)}
+              className="text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg transition-colors"
+            >
+              {showIgnored ? 'Masquer' : 'Afficher'} les logements ignorés
+            </button>
+          )}
+        </div>
+
+        {showIgnored && allIgnoredLinks.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            {allIgnoredLinks.map((item, idx) => (
+              <div key={idx} className="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col opacity-75 hover:opacity-100 transition-opacity">
+                 <div className="flex justify-between items-center mb-2 gap-2">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <span className="text-sm font-bold text-gray-500 whitespace-nowrap">Bien #{idx + 1}</span>
+                      <span className="text-[10px] font-semibold text-gray-600 bg-gray-200 px-2 py-0.5 rounded-full truncate">{item.searchName}</span>
+                    </div>
+                    <span className="text-[10px] text-gray-400 whitespace-nowrap">{new Date(item.link.addedAt).toLocaleDateString('fr-FR')}</span>
+                 </div>
+
+                 <a href={item.link.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-500 line-through hover:text-blue-600 truncate mb-3">
                     {item.link.url}
                  </a>
-                 <div className="mt-auto flex justify-end pt-3">
-                    <button onClick={() => handleToggleFavorite(item.searchId, item.link.url)} className="text-xs bg-white border border-red-200 hover:bg-red-100 text-red-600 px-2 py-1 rounded flex items-center" title="Retirer des favoris">
-                       <Heart className="w-3.5 h-3.5 mr-1 fill-current" /> Retirer
+
+                 <div className="flex items-center gap-2 mt-auto justify-end">
+                    <button onClick={() => handleRestoreLink(item.searchId, item.link.url)} className="flex items-center text-xs bg-white border border-gray-300 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 text-gray-600 px-3 py-1.5 rounded-lg font-medium transition-colors" title="Restaurer ce bien">
+                       <RotateCcw className="w-3.5 h-3.5 mr-1" /> Restaurer
                     </button>
                  </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {searches.length === 0 ? (
         <div className="text-center py-20 bg-white rounded-2xl border border-gray-200 shadow-sm">
@@ -357,52 +444,14 @@ export function ImmoSearch() {
                   </div>
                 </div>
 
-                <div className="p-5 flex-1 overflow-y-auto max-h-64">
+                <div className="p-5 flex-1 flex flex-col justify-center">
                   {search.lastError && (
                      <div className="text-xs bg-red-50 text-red-600 p-2 rounded mb-3">Erreur : {search.lastError}</div>
                   )}
-                  <div className="text-xs text-gray-500 mb-3">
-                    {search.links.length} biens trouvés (Dernière vérif. : {new Date(search.lastChecked).toLocaleString('fr-FR')})
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600 font-medium">{search.links.length} biens trouvés</span>
+                    <span className="text-xs text-gray-400">MàJ : {new Date(search.lastChecked).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
-                  <ul className="space-y-2">
-                    {search.links.map((l, idx) => {
-                      const linkObj = typeof l === 'string' ? { url: l, isRead: false, isFavorite: false, isIgnored: false } : l;
-                      return (
-                        <li key={idx} className={`flex items-center justify-between group text-sm ${linkObj.isIgnored ? 'opacity-50' : ''}`}>
-                          <div className="flex-1 min-w-0 flex items-center gap-2">
-                             <a href={linkObj.url} target="_blank" rel="noopener noreferrer" className={`hover:text-blue-600 hover:underline truncate pr-2 ${linkObj.isIgnored ? 'text-gray-400 line-through' : linkObj.isRead ? 'text-gray-500' : 'text-[#212529] font-medium'}`}>
-                               Bien #{idx + 1}
-                             </a>
-                             {linkObj.isFavorite && !linkObj.isIgnored && <Heart className="w-3 h-3 text-red-500 fill-current shrink-0" />}
-                          </div>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                             {linkObj.isIgnored ? (
-                               <button onClick={() => handleRestoreLink(search.id, linkObj.url)} className="text-gray-400 hover:text-blue-500 p-1 flex items-center" title="Restaurer">
-                                 <RotateCcw className="w-3.5 h-3.5" />
-                               </button>
-                             ) : (
-                               <>
-                                 {!linkObj.isRead && (
-                                   <button onClick={() => handleMarkAsRead(search.id, linkObj.url)} className="text-gray-400 hover:text-green-500 p-1" title="Marquer comme lu">
-                                     <CheckCircle2 className="w-4 h-4" />
-                                   </button>
-                                 )}
-                                 <button onClick={() => handleToggleFavorite(search.id, linkObj.url)} className="text-gray-400 hover:text-red-500 p-1" title="Favori">
-                                   <Heart className="w-4 h-4" />
-                                 </button>
-                                 <button onClick={() => handleIgnoreLink(search.id, linkObj.url)} className="text-gray-400 hover:text-red-500 p-1" title="Ignorer">
-                                   <X className="w-4 h-4" />
-                                 </button>
-                               </>
-                             )}
-                          </div>
-                        </li>
-                      );
-                    })}
-                    {search.links.length === 0 && !search.isScraping && (
-                      <li className="text-sm text-gray-400 italic">Aucun bien trouvé.</li>
-                    )}
-                  </ul>
                 </div>
               </div>
             ))}
