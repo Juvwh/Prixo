@@ -32,7 +32,14 @@ import {
 } from '@dnd-kit/sortable';
 import { useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Trash2, ListChecks, Bell, ChevronDown } from 'lucide-react';
+import { Trash2, ListChecks, Bell, ChevronDown, Combine } from 'lucide-react';
+import {
+  getVariants,
+  getActiveVariant,
+  draftsToVariants,
+  mirrorOfVariant,
+  newVariantId,
+} from '../utils/variants';
 
 export function Dashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -56,6 +63,18 @@ export function Dashboard() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'custom' | 'date_desc' | 'favorites_first' | 'last_change_desc' | 'price_asc' | 'price_desc'>('custom');
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+
+  // Couleur affichée par article. La sélection est propre à chaque utilisateur :
+  // les règles Firestore réservent l'écriture d'un article à son créateur, et un
+  // article partagé doit rester consultable dans la couleur de son choix par les
+  // deux comptes.
+  const [variantSelection, setVariantSelection] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('prixo.variantSelection') || '{}');
+    } catch {
+      return {};
+    }
+  });
 
   // Fetch User Profile for notifications
   useEffect(() => {
@@ -157,8 +176,17 @@ export function Dashboard() {
   const handleAddItem = async (data: any) => {
     if (!user) return;
     try {
+      const { variants: drafts, ...rest } = data;
+      const variants = draftsToVariants(drafts || []);
+      const active = variants[0];
+
       const docRef = await addDoc(collection(db, 'items'), {
-        ...data,
+        ...rest,
+        variants,
+        activeVariantId: active?.id || '',
+        // Miroir de la variante active : conserve le tri par prix, le budget
+        // cumulé et la cloche qui lisent les champs de premier niveau.
+        ...(active ? mirrorOfVariant(active) : {}),
         userId: user.uid,
         groupId: userProfile?.groupId || '',
         currentPrice: 0, // Will be updated by initial scrape
@@ -321,35 +349,180 @@ export function Dashboard() {
 
   const handleEditItem = async (id: string, data: any) => {
     try {
-      await updateDoc(doc(db, 'items', id), data);
+      const found = items.find(i => i.id === id);
+      const item = found ? withSelectedVariant(found) : found;
+      let payload: any = data;
+
+      if (Array.isArray(data.variants)) {
+        // Édition depuis le formulaire : on recolle prix et historiques connus.
+        const { variants: drafts, ...rest } = data;
+        const variants = draftsToVariants(drafts, getVariants(item));
+        const active = variants.find(v => v.id === item?.activeVariantId) || variants[0];
+
+        payload = {
+          ...rest,
+          variants,
+          activeVariantId: active?.id || '',
+          ...(active ? mirrorOfVariant(active) : {}),
+        };
+      } else if (item && Array.isArray(item.variants) && item.variants.length > 0
+                 && (data.history !== undefined || data.currentPrice !== undefined)) {
+        // Correction manuelle de l'historique : elle porte sur la couleur affichée.
+        const active = getActiveVariant(item);
+        const variants = getVariants(item).map(v =>
+          v.id === active?.id ? { ...v, ...data } : v
+        );
+        const updated = variants.find(v => v.id === active?.id) || variants[0];
+
+        payload = { variants, ...mirrorOfVariant(updated) };
+      }
+
+      await updateDoc(doc(db, 'items', id), payload);
 
       // Update selectedItem state to reflect changes in ItemDetailModal if it's open
-      setSelectedItem((prev: any) => prev && prev.id === id ? { ...prev, ...data } : prev);
+      setSelectedItem((prev: any) => prev && prev.id === id ? { ...prev, ...payload } : prev);
     } catch (error) {
       console.error("Error updating document: ", error);
+      showNotification("Erreur lors de la mise à jour de l'article.", 'error');
+    }
+  };
+
+  /** Bascule la couleur affichée pour un article. */
+  const handleSelectVariant = async (itemId: string, variantId: string) => {
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+
+    const variant = getVariants(item).find(v => v.id === variantId);
+    if (!variant) return;
+
+    // Le changement est immédiat et purement local : aucun aller-retour réseau.
+    setVariantSelection(prev => {
+      const next = { ...prev, [itemId]: variantId };
+      try {
+        localStorage.setItem('prixo.variantSelection', JSON.stringify(next));
+      } catch {
+        // Stockage indisponible (navigation privée) : la sélection vaut pour la session.
+      }
+      return next;
+    });
+
+    // Pour ses propres articles, on aligne aussi les champs de premier niveau :
+    // ce sont eux qui alimentent le tri par prix, le budget et le mail du matin.
+    if (item.userId !== user?.uid) return;
+
+    try {
+      await updateDoc(doc(db, 'items', itemId), {
+        activeVariantId: variantId,
+        ...mirrorOfVariant(variant),
+      });
+    } catch (error) {
+      console.error("Error switching variant: ", error);
+    }
+  };
+
+  /** L'article vu dans la couleur choisie par cet utilisateur. */
+  const withSelectedVariant = (item: any) =>
+    variantSelection[item.id] && variantSelection[item.id] !== item.activeVariantId
+      ? { ...item, activeVariantId: variantSelection[item.id] }
+      : item;
+
+  /**
+   * Regroupe plusieurs articles en un seul : chaque article sélectionné devient
+   * une couleur du premier d'entre eux, puis les doublons sont supprimés.
+   */
+  const handleMergeSelectedItems = async () => {
+    const selected = items.filter(i => selectedItemIds.includes(i.id));
+    if (selected.length < 2) return;
+
+    const notOwned = selected.filter(i => i.userId !== user?.uid);
+    if (notOwned.length > 0) {
+      showNotification("Vous ne pouvez fusionner que vos propres articles.", 'error');
+      return;
+    }
+
+    const names = selected.map(i => i.name).join('\n• ');
+    if (!window.confirm(
+      `Regrouper ces ${selected.length} articles en un seul, avec une couleur par article ?\n\n• ${names}\n\n` +
+      `Le nom et la marque du premier article seront conservés.`
+    )) return;
+
+    // Le premier article sélectionné (dans l'ordre affiché) devient le porteur.
+    const ordered = displayedItems.filter(i => selectedItemIds.includes(i.id));
+    const target = ordered[0] || selected[0];
+    const others = ordered.slice(1);
+
+    // Chaque article apporte ses variantes ; celles sans nom de couleur héritent
+    // du nom de l'article pour rester identifiables dans le sélecteur.
+    const mergedVariants = ordered.flatMap(item =>
+      getVariants(item).map(v => ({
+        ...v,
+        id: newVariantId(),
+        color: v.color || item.name,
+      }))
+    );
+
+    const active = mergedVariants[0];
+
+    try {
+      await updateDoc(doc(db, 'items', target.id), {
+        variants: mergedVariants,
+        activeVariantId: active.id,
+        ...mirrorOfVariant(active),
+        boards: Array.from(new Set(ordered.flatMap(i => i.boards || []))),
+        isFavorite: ordered.some(i => i.isFavorite),
+      });
+
+      for (const item of others) {
+        await deleteDoc(doc(db, 'items', item.id));
+      }
+
+      setSelectedItemIds([]);
+      setIsSelectionModeActive(false);
+      showNotification(`${ordered.length} articles regroupés en ${mergedVariants.length} couleurs.`, 'success');
+    } catch (error) {
+      console.error("Error merging items: ", error);
+      showNotification("Erreur lors du regroupement des articles.", 'error');
     }
   };
 
   // Calculate unread items for notifications
-  const getLastPriceChangeDate = (item: any) => {
-    if (!item.history || item.history.length < 2) return null;
-    for (let i = item.history.length - 1; i > 0; i--) {
-      if (item.history[i].price !== item.history[i - 1].price) {
-        return item.history[i].date;
+  // Dernier changement de prix belge dans un historique donné.
+  // Les prix français sont volontairement ignorés ici : ils servent à comparer,
+  // pas à notifier.
+  const findLastChange = (history: any[]) => {
+    if (!history || history.length < 2) return null;
+    for (let i = history.length - 1; i > 0; i--) {
+      if (history[i].price !== history[i - 1].price) {
+        return {
+          date: history[i].date,
+          price: history[i].price,
+          diff: history[i].price - history[i - 1].price,
+        };
       }
     }
     return null;
   };
 
-  const getPriceDifference = (item: any) => {
-    if (!item.history || item.history.length < 2) return 0;
-    for (let i = item.history.length - 1; i > 0; i--) {
-      if (item.history[i].price !== item.history[i - 1].price) {
-        return item.history[i].price - item.history[i - 1].price;
+  /**
+   * Changement le plus récent de l'article, toutes couleurs confondues : une
+   * baisse sur une couleur non affichée doit remonter dans la cloche.
+   */
+  const getLastPriceChange = (item: any) => {
+    let best: { date: string; price: number; diff: number; color: string } | null = null;
+
+    for (const variant of getVariants(item)) {
+      const change = findLastChange(variant.history);
+      if (!change) continue;
+      if (!best || new Date(change.date).getTime() > new Date(best.date).getTime()) {
+        best = { ...change, color: variant.color };
       }
     }
-    return 0;
+    return best;
   };
+
+  const getLastPriceChangeDate = (item: any) => getLastPriceChange(item)?.date ?? null;
+
+  const getPriceDifference = (item: any) => getLastPriceChange(item)?.diff ?? 0;
 
   // Refactored notification history logic
   const notificationHistory = items
@@ -758,9 +931,10 @@ export function Dashboard() {
                           </div>
                         ) : (
                           notificationHistory.map((item) => {
-                            const diff = getPriceDifference(item);
+                            const change = getLastPriceChange(item);
+                            const diff = change?.diff ?? 0;
                             const isDrop = diff < 0;
-                            const lastChangeDate = getLastPriceChangeDate(item);
+                            const lastChangeDate = change?.date ?? null;
                             const changeDateMs = lastChangeDate ? new Date(lastChangeDate).getTime() : 0;
                             const isUnread = frozenReadAtMs !== null && changeDateMs > frozenReadAtMs;
 
@@ -777,9 +951,15 @@ export function Dashboard() {
                               >
                                 <img src={item.imageUrl} alt={item.name} className="w-12 h-12 object-contain rounded bg-white border border-gray-200" />
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-[#212529] truncate">{item.name}</p>
+                                  {item.brand && (
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#6c757d] truncate">{item.brand}</p>
+                                  )}
+                                  <p className="text-sm font-medium text-[#212529] truncate">
+                                    {item.name}
+                                    {change?.color && <span className="text-[#6c757d] font-normal"> — {change.color}</span>}
+                                  </p>
                                   <div className="flex items-center gap-2 mt-1">
-                                    <span className={`text-sm font-bold ${isUnread ? 'text-[#212529]' : 'text-[#495057]'}`}>{item.currentPrice}€</span>
+                                    <span className={`text-sm font-bold ${isUnread ? 'text-[#212529]' : 'text-[#495057]'}`}>{change?.price ?? item.currentPrice}€</span>
                                     <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${isDrop ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} ${!isUnread && 'opacity-80'}`}>
                                       {isDrop ? '' : '+'}{diff.toFixed(2)}€
                                     </span>
@@ -836,6 +1016,15 @@ export function Dashboard() {
                 >
                   Tout désélectionner
                 </button>
+                <button
+                  onClick={handleMergeSelectedItems}
+                  disabled={selectedItemIds.length < 2}
+                  title="Regrouper les articles sélectionnés en un seul, une couleur par article"
+                  className="flex items-center gap-2 text-sm font-medium text-[#212529] bg-white border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Combine size={16} />
+                  Regrouper les couleurs
+                </button>
                 <span className="text-sm text-[#6c757d] ml-auto">
                   {selectedItemIds.length} article(s) sélectionné(s)
                 </span>
@@ -864,10 +1053,11 @@ export function Dashboard() {
                 displayedItems.map(item => (
                   <ItemCard
                     key={item.id}
-                    {...item}
+                    {...withSelectedVariant(item)}
                     isSelected={isSelectionModeActive && selectedItemIds.includes(item.id)}
                     isSelectionModeActive={isSelectionModeActive}
                     onClick={() => handleItemClick(item)}
+                    onSelectVariant={handleSelectVariant}
                   />
                 ))
               )}
@@ -890,7 +1080,7 @@ export function Dashboard() {
         isOpen={!!selectedItem}
         onClose={() => setSelectedItem(null)}
         item={{
-           ...selectedItem,
+           ...(selectedItem ? withSelectedVariant(selectedItem) : selectedItem),
            // Pour l'affichage dans le modal : remplacer les IDs par les noms des tableaux
            boards: selectedItem?.boards?.map((id: string) => boardsData.find(b => b.id === id)?.name).filter(Boolean)
         }}
@@ -898,6 +1088,7 @@ export function Dashboard() {
         onDelete={handleDeleteItem}
         onEdit={() => setIsEditModalOpen(true)}
         onEditPriceHistory={() => setIsEditPriceModalOpen(true)}
+        onSelectVariant={handleSelectVariant}
         isRefreshing={isRefreshing}
         notification={notification}
       />
@@ -906,14 +1097,14 @@ export function Dashboard() {
         isOpen={isEditPriceModalOpen}
         onClose={() => setIsEditPriceModalOpen(false)}
         onSubmit={handleEditItem}
-        item={selectedItem}
+        item={selectedItem ? withSelectedVariant(selectedItem) : selectedItem}
       />
 
       <EditItemModal
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
         onSubmit={handleEditItem}
-        item={selectedItem}
+        item={selectedItem ? withSelectedVariant(selectedItem) : selectedItem}
         boards={boardsData}
       />
 

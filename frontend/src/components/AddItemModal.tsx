@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { X, Lock, Heart } from 'lucide-react';
+import { X, Lock, Heart, Tag } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { VariantsEditor, VariantDraft, emptyVariantDraft } from './VariantsEditor';
+import { guessBrand } from '../utils/variants';
 
 interface AddItemModalProps {
   isOpen: boolean;
@@ -13,42 +15,58 @@ interface AddItemModalProps {
 export function AddItemModal({ isOpen, onClose, onSubmit, boards, initialBoardId }: AddItemModalProps) {
   const [formData, setFormData] = useState({
     name: '',
+    brand: '',
     boards: [] as string[],
-    url: '',
-    imageUrl: '',
     isPrivate: false,
     isFavorite: false,
   });
+  const [variants, setVariants] = useState<VariantDraft[]>([emptyVariantDraft()]);
+  const [brandTouched, setBrandTouched] = useState(false);
 
   // Pre-fill board when modal opens if a specific board is selected
   React.useEffect(() => {
     if (isOpen) {
-      setFormData(prev => ({
-        ...prev,
-        boards: (initialBoardId && initialBoardId !== 'favorites') ? [initialBoardId] : []
-      }));
+      setFormData({
+        name: '',
+        brand: '',
+        boards: (initialBoardId && initialBoardId !== 'favorites') ? [initialBoardId] : [],
+        isPrivate: false,
+        isFavorite: false,
+      });
+      setVariants([emptyVariantDraft()]);
+      setBrandTouched(false);
     }
   }, [isOpen, initialBoardId]);
 
   if (!isOpen) return null;
 
+  const handleVariantsChange = (next: VariantDraft[]) => {
+    setVariants(next);
+    // Pré-remplissage de la marque à partir du domaine, tant que l'utilisateur
+    // n'a pas saisi la sienne.
+    if (!brandTouched) {
+      const guessed = guessBrand(next[0]?.url || '');
+      if (guessed) setFormData(prev => ({ ...prev, brand: guessed }));
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
+    onSubmit({ ...formData, brand: formData.brand.trim(), variants });
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        <div className="flex justify-between items-center p-6 border-b border-[#dee2e6]">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex justify-between items-center p-6 border-b border-[#dee2e6] shrink-0">
           <h2 className="text-xl font-semibold text-[#212529]">Ajouter un article</h2>
           <button onClick={onClose} className="p-2 text-[#6c757d] hover:text-[#212529] hover:bg-[#f8f9fa] rounded-full transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto">
           <div>
             <label className="block text-sm font-medium text-[#212529] mb-1.5">Nom de l'article</label>
             <input
@@ -59,6 +77,21 @@ export function AddItemModal({ isOpen, onClose, onSubmit, boards, initialBoardId
               value={formData.name}
               onChange={e => setFormData({...formData, name: e.target.value})}
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[#212529] mb-1.5">Marque</label>
+            <div className="relative">
+              <Tag className="w-4 h-4 text-[#6c757d] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                required
+                type="text"
+                placeholder="Ex: Ikea, Jysk, Maisons du Monde"
+                className="w-full pl-11 pr-4 py-3 rounded-xl border border-[#dee2e6] bg-[#f8f9fa] focus:bg-white focus:ring-2 focus:ring-[#a8d5ba] focus:border-transparent outline-none transition-all"
+                value={formData.brand}
+                onChange={e => { setBrandTouched(true); setFormData({...formData, brand: e.target.value}); }}
+              />
+            </div>
           </div>
 
           <div>
@@ -90,28 +123,7 @@ export function AddItemModal({ isOpen, onClose, onSubmit, boards, initialBoardId
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[#212529] mb-1.5">Lien (URL)</label>
-            <input
-              required
-              type="url"
-              placeholder="https://..."
-              className="w-full px-4 py-3 rounded-xl border border-[#dee2e6] bg-[#f8f9fa] focus:bg-white focus:ring-2 focus:ring-[#a8d5ba] focus:border-transparent outline-none transition-all"
-              value={formData.url}
-              onChange={e => setFormData({...formData, url: e.target.value})}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-[#212529] mb-1.5">Lien de l'image (Optionnel)</label>
-            <input
-              type="url"
-              placeholder="https://.../image.jpg"
-              className="w-full px-4 py-3 rounded-xl border border-[#dee2e6] bg-[#f8f9fa] focus:bg-white focus:ring-2 focus:ring-[#a8d5ba] focus:border-transparent outline-none transition-all"
-              value={formData.imageUrl}
-              onChange={e => setFormData({...formData, imageUrl: e.target.value})}
-            />
-          </div>
+          <VariantsEditor variants={variants} onChange={handleVariantsChange} />
 
           <div className="flex items-center justify-between py-2 border-t border-[#dee2e6] pt-4">
             <div className="flex items-center space-x-3">

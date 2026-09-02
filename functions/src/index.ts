@@ -171,6 +171,210 @@ async function scrapePrice(url: string, existingBrowser?: Browser): Promise<{ pr
   }
 }
 
+// --- Variantes de couleur et prix multi-pays -------------------------------
+//
+// Un article peut regrouper plusieurs couleurs, chacune avec sa page produit.
+// Pour chaque couleur on relève le prix belge et, quand une page française
+// existe, le prix français. Seul le prix belge alimente les notifications.
+
+interface ScrapeVariant {
+  id: string;
+  color: string;
+  colorHex: string;
+  url: string;
+  urlFr: string;
+  imageUrl: string;
+  currentPrice: number;
+  currentPriceFr: number | null;
+  history: Array<{ date: string; price: number }>;
+  historyFr: Array<{ date: string; price: number }>;
+  lastScrapeError: string | null;
+  lastScrapeErrorFr: string | null;
+}
+
+/**
+ * Déduit l'URL française d'une URL belge.
+ * Doit rester alignée sur frontend/src/utils/variants.ts (deriveFrUrl).
+ * Retourne '' si le site ne suit aucun schéma reconnu.
+ */
+function deriveFrUrl(url: string): string {
+  if (!url) return '';
+
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return '';
+  }
+
+  // jysk.be/fr/... -> jysk.fr/...
+  if (u.hostname.endsWith('.be')) {
+    u.hostname = `${u.hostname.slice(0, -3)}.fr`;
+    if (u.pathname === '/fr' || u.pathname === '/fr/') {
+      u.pathname = '/';
+    } else if (u.pathname.startsWith('/fr/')) {
+      u.pathname = u.pathname.slice(3);
+    }
+    return u.toString();
+  }
+
+  // ikea.com/be/fr/... -> ikea.com/fr/fr/...
+  const segments = u.pathname.split('/');
+  const localeIndex = segments.findIndex(seg => /^(be|be-fr|fr-be)$/i.test(seg));
+  if (localeIndex !== -1) {
+    const segment = segments[localeIndex];
+    const isUpper = segment === segment.toUpperCase();
+    const replacement = /^be$/i.test(segment) ? 'fr' : 'fr-fr';
+    segments[localeIndex] = isUpper ? replacement.toUpperCase() : replacement;
+    u.pathname = segments.join('/');
+    return u.toString();
+  }
+
+  return '';
+}
+
+/** Normalise un article en variantes, y compris les articles antérieurs aux couleurs. */
+function normalizeVariants(itemData: any): ScrapeVariant[] {
+  const raw = Array.isArray(itemData?.variants) && itemData.variants.length > 0
+    ? itemData.variants
+    : [{
+        id: 'default',
+        url: itemData?.url,
+        urlFr: itemData?.urlFr,
+        imageUrl: itemData?.imageUrl,
+        currentPrice: itemData?.currentPrice,
+        currentPriceFr: itemData?.currentPriceFr,
+        history: itemData?.history,
+        historyFr: itemData?.historyFr,
+        lastScrapeError: itemData?.lastScrapeError,
+        lastScrapeErrorFr: itemData?.lastScrapeErrorFr,
+      }];
+
+  return raw.map((v: any, i: number) => ({
+    id: v.id || `default_${i}`,
+    color: v.color || '',
+    colorHex: v.colorHex || '',
+    url: v.url || '',
+    urlFr: v.urlFr || '',
+    imageUrl: v.imageUrl || '',
+    currentPrice: typeof v.currentPrice === 'number' ? v.currentPrice : 0,
+    currentPriceFr: typeof v.currentPriceFr === 'number' ? v.currentPriceFr : null,
+    history: Array.isArray(v.history) ? v.history : [],
+    historyFr: Array.isArray(v.historyFr) ? v.historyFr : [],
+    lastScrapeError: v.lastScrapeError || null,
+    lastScrapeErrorFr: v.lastScrapeErrorFr || null,
+  }));
+}
+
+/** Ajoute un relevé daté, en écrasant celui du jour s'il existe déjà. */
+function pushPricePoint(history: Array<{ date: string; price: number }>, price: number) {
+  const today = new Date().toISOString().split('T')[0];
+  const next = [...history];
+  if (next.length > 0 && next[next.length - 1].date === today) {
+    next[next.length - 1] = { date: today, price };
+  } else {
+    next.push({ date: today, price });
+  }
+  return next;
+}
+
+/** Champs de premier niveau reflétant la variante affichée. */
+function mirrorOfVariant(variant: ScrapeVariant) {
+  return {
+    url: variant.url,
+    urlFr: variant.urlFr || '',
+    imageUrl: variant.imageUrl || '',
+    currentPrice: variant.currentPrice || 0,
+    currentPriceFr: variant.currentPriceFr,
+    history: variant.history || [],
+    historyFr: variant.historyFr || [],
+    lastScrapeError: variant.lastScrapeError,
+    lastScrapeErrorFr: variant.lastScrapeErrorFr,
+  };
+}
+
+interface VariantPriceChange {
+  color: string;
+  oldPrice: number;
+  newPrice: number;
+  url: string;
+  diff: number;
+}
+
+/**
+ * Relève les prix de toutes les couleurs d'un article (Belgique + France) et
+ * construit la mise à jour Firestore correspondante.
+ * Les changements retournés sont exclusivement belges : la France n'alimente
+ * ni le mail quotidien ni la cloche.
+ */
+async function scrapeItemVariants(
+  itemData: any,
+  browser?: Browser
+): Promise<{ updateData: any; changes: VariantPriceChange[] }> {
+  const variants = normalizeVariants(itemData);
+  const changes: VariantPriceChange[] = [];
+
+  for (const variant of variants) {
+    if (!variant.url) {
+      variant.lastScrapeError = 'Aucun lien belge enregistré pour cette couleur';
+      continue;
+    }
+
+    // --- Belgique (source de vérité pour les alertes)
+    const { price: priceBe, error: errorBe } = await scrapePrice(variant.url, browser);
+
+    if (priceBe !== null) {
+      if (priceBe !== variant.currentPrice) {
+        changes.push({
+          color: variant.color,
+          oldPrice: variant.currentPrice,
+          newPrice: priceBe,
+          url: variant.url,
+          diff: priceBe - variant.currentPrice,
+        });
+        variant.history = pushPricePoint(variant.history, priceBe);
+        variant.currentPrice = priceBe;
+      }
+      variant.lastScrapeError = null;
+    } else {
+      variant.lastScrapeError = errorBe || 'Erreur inconnue lors du scraping';
+    }
+
+    // --- France (comparaison seulement, historique séparé)
+    const candidateFr = variant.urlFr || deriveFrUrl(variant.url);
+    if (candidateFr) {
+      const { price: priceFr, error: errorFr } = await scrapePrice(candidateFr, browser);
+
+      if (priceFr !== null) {
+        // On ne mémorise une URL déduite qu'une fois qu'elle a fait ses preuves,
+        // pour ne pas enregistrer un lien mort dans la fiche article.
+        variant.urlFr = candidateFr;
+        if (priceFr !== variant.currentPriceFr) {
+          variant.historyFr = pushPricePoint(variant.historyFr, priceFr);
+          variant.currentPriceFr = priceFr;
+        }
+        variant.lastScrapeErrorFr = null;
+      } else {
+        variant.lastScrapeErrorFr = errorFr || 'Page française introuvable';
+      }
+    }
+  }
+
+  const active = variants.find(v => v.id === itemData?.activeVariantId) || variants[0];
+
+  const updateData: any = {
+    variants,
+    activeVariantId: active?.id || '',
+    lastChecked: new Date().toISOString(),
+    isScraping: false,
+    scrapeStatus: active?.lastScrapeError ? 'error' : 'success',
+    scrapeError: admin.firestore.FieldValue.delete(),
+    ...(active ? mirrorOfVariant(active) : {}),
+  };
+
+  return { updateData, changes };
+}
+
 // Callable function to refresh all items in a board
 export const refreshBoardItemsPrice = functions
   .region('europe-west1')
@@ -285,39 +489,11 @@ export const refreshBoardItemsPrice = functions
                 lastChecked: new Date().toISOString()
             });
 
-            const oldPrice = itemData.currentPrice;
-            const { price: newPrice, error: scrapeError } = await scrapePrice(itemData.url, browser || undefined);
+            const { updateData, changes } = await scrapeItemVariants(itemData, browser || undefined);
 
-            const updateData: any = {
-              lastChecked: new Date().toISOString()
-            };
-
-            if (newPrice !== null) {
-              updateData.scrapeStatus = 'success';
-              if (newPrice !== oldPrice) {
-                const today = new Date().toISOString().split('T')[0];
-                let history = itemData.history || [];
-                if (history.length > 0 && history[history.length - 1].date === today) {
-                   history[history.length - 1] = { date: today, price: newPrice };
-                } else {
-                   history.push({ date: today, price: newPrice });
-                }
-
-                updateData.currentPrice = newPrice;
-                updateData.history = history;
-                updateData.lastScrapeError = admin.firestore.FieldValue.delete();
-                updatedCount++;
-              } else {
-                updateData.lastScrapeError = admin.firestore.FieldValue.delete();
-              }
-            } else {
-              // Scraping failed
-              updateData.scrapeStatus = 'error';
-              updateData.lastScrapeError = scrapeError || "Erreur inconnue lors du scraping";
+            if (changes.length > 0) {
+              updatedCount += changes.length;
             }
-
-            // Clean up old scrapeError field if it exists
-            updateData.scrapeError = admin.firestore.FieldValue.delete();
 
             await doc.ref.update(updateData);
           } catch (err) {
@@ -370,50 +546,45 @@ export const refreshItemPrice = functions
         throw new functions.https.HttpsError('permission-denied', 'Cannot refresh private item.');
     }
 
-    const { price: newPrice, error: scrapeError } = await scrapePrice(itemData?.url);
+    // Un article peut demander plusieurs pages (une par couleur, et une par
+    // pays) : on partage une seule instance de navigateur pour toutes.
+    let browser: Browser | null = null;
+    let updateData: any;
+    let changes: VariantPriceChange[];
 
-    if (newPrice !== null && newPrice !== itemData?.currentPrice) {
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      const newHistoryEntry = { date: today, price: newPrice };
-
-      let history = itemData?.history || [];
-      // If we already have an entry for today, replace it, otherwise append
-      if (history.length > 0 && history[history.length - 1].date === today) {
-         history[history.length - 1] = newHistoryEntry;
-      } else {
-         history.push(newHistoryEntry);
-      }
-
-      await itemRef.update({
-        currentPrice: newPrice,
-        history: history,
-        lastChecked: new Date().toISOString(),
-        isScraping: false,
-        lastScrapeError: admin.firestore.FieldValue.delete(),
-        scrapeError: admin.firestore.FieldValue.delete()
+    try {
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: { width: 1920, height: 1080 } as any,
+        executablePath: await chromium.executablePath(),
+        headless: true,
       });
 
-      return { success: true, newPrice };
-    } else {
-      // Just update the last check time, and handle potential failure
-      const updateData: any = {
-        lastChecked: new Date().toISOString(),
-        isScraping: false,
-        scrapeError: admin.firestore.FieldValue.delete()
-      };
-
-      if (newPrice === null) {
-        updateData.lastScrapeError = scrapeError || "Erreur inconnue lors du scraping";
-      } else {
-        updateData.lastScrapeError = admin.firestore.FieldValue.delete();
+      ({ updateData, changes } = await scrapeItemVariants(itemData, browser));
+    } catch (err) {
+      console.error("Failed to scrape item:", err);
+      throw new functions.https.HttpsError('internal', "Impossible de relever les prix de cet article.");
+    } finally {
+      if (browser) {
+        await browser.close().catch(() => {});
       }
-
-      await itemRef.update(updateData);
-
-      // Do not return FieldValue.delete() to the client
-      const returnError = newPrice === null ? updateData.lastScrapeError : null;
-      return { success: true, message: 'Price unchanged or scraping failed.', currentPrice: itemData?.currentPrice, lastScrapeError: returnError };
     }
+
+    await itemRef.update(updateData);
+
+    const activeChange = changes.find(c => c.url === updateData.url);
+
+    if (activeChange) {
+      return { success: true, newPrice: activeChange.newPrice, updatedCount: changes.length };
+    }
+
+    return {
+      success: true,
+      message: 'Price unchanged or scraping failed.',
+      currentPrice: updateData.currentPrice,
+      lastScrapeError: updateData.lastScrapeError,
+      updatedCount: changes.length,
+    };
 });
 
 // Scheduled function to scrape all items and send summary email
@@ -802,6 +973,8 @@ export const nightlyScrape = functions
 
     interface ItemChange {
       name: string;
+      brand: string;
+      color: string;
       oldPrice: number;
       newPrice: number;
       url: string;
@@ -842,43 +1015,22 @@ export const nightlyScrape = functions
           }
 
           const itemData = doc.data();
-          const oldPrice = itemData.currentPrice;
-          const { price: newPrice, error: scrapeError } = await scrapePrice(itemData.url, browser || undefined);
+          const { updateData, changes: variantChanges } = await scrapeItemVariants(itemData, browser || undefined);
 
-          const updateData: any = {
-            lastChecked: new Date().toISOString(),
-            scrapeError: admin.firestore.FieldValue.delete()
-          };
-
-          if (newPrice !== null) {
-            if (newPrice !== oldPrice) {
-              changes.push({
-                name: itemData.name,
-                oldPrice: oldPrice,
-                newPrice: newPrice,
-                url: itemData.url,
-                ownerId: itemData.userId,
-                groupId: itemData.groupId,
-                isPrivate: itemData.isPrivate || false,
-                diff: newPrice - oldPrice
-              });
-
-              const today = new Date().toISOString().split('T')[0];
-              let history = itemData.history || [];
-              if (history.length > 0 && history[history.length - 1].date === today) {
-                 history[history.length - 1] = { date: today, price: newPrice };
-              } else {
-                 history.push({ date: today, price: newPrice });
-              }
-
-              updateData.currentPrice = newPrice;
-              updateData.history = history;
-              updateData.lastScrapeError = admin.firestore.FieldValue.delete();
-            } else {
-              updateData.lastScrapeError = admin.firestore.FieldValue.delete();
-            }
-          } else {
-            updateData.lastScrapeError = scrapeError || "Erreur inconnue lors du scraping";
+          // Seuls les prix belges déclenchent une notification.
+          for (const change of variantChanges) {
+            changes.push({
+              name: itemData.name,
+              brand: itemData.brand || '',
+              color: change.color,
+              oldPrice: change.oldPrice,
+              newPrice: change.newPrice,
+              url: change.url,
+              ownerId: itemData.userId,
+              groupId: itemData.groupId,
+              isPrivate: itemData.isPrivate || false,
+              diff: change.diff,
+            });
           }
 
           await doc.ref.update(updateData);
@@ -940,20 +1092,43 @@ export const nightlyScrape = functions
             // Sort: Price drops first, then price increases
             userChanges.sort((a, b) => a.diff - b.diff);
 
-            let htmlContent = '<h2>Récapitulatif des changements de prix</h2><ul>';
+            let htmlContent = `
+              <div style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#212529;">
+                <h2 style="font-weight:600;">Récapitulatif des changements de prix</h2>
+                <p style="color:#6c757d; font-size:13px; margin-top:-8px;">
+                  Prix relevés sur les sites belges 🇧🇪
+                </p>
+                <table style="width:100%; border-collapse:collapse;">
+            `;
 
             for (const change of userChanges) {
-               const color = change.diff < 0 ? 'green' : 'red';
+               const accent = change.diff < 0 ? '#2f8f5b' : '#c0392b';
                const arrow = change.diff < 0 ? '↓' : '↑';
+               const brandTag = change.brand
+                 ? `<span style="display:inline-block; background:#eef2f0; color:#212529; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; padding:2px 8px; border-radius:999px; margin-right:8px;">${change.brand}</span>`
+                 : '';
+               const colorTag = change.color
+                 ? `<span style="color:#6c757d; font-size:13px;"> — ${change.color}</span>`
+                 : '';
+
                htmlContent += `
-                <li style="margin-bottom: 10px;">
-                  <strong>${change.name}</strong><br/>
-                  Ancien prix: ${change.oldPrice}€ | Nouveau prix: <span style="color:${color}">${change.newPrice}€ ${arrow}</span><br/>
-                  <a href="${change.url}">Voir sur le site</a>
-                </li>
+                <tr>
+                  <td style="padding:14px 0; border-bottom:1px solid #dee2e6;">
+                    <div style="margin-bottom:6px;">${brandTag}<strong>${change.name}</strong>${colorTag}</div>
+                    <div style="font-size:14px;">
+                      <span style="color:#6c757d; text-decoration:line-through;">${change.oldPrice}€</span>
+                      <span style="color:${accent}; font-weight:700; margin-left:8px;">${change.newPrice}€ ${arrow}</span>
+                      <span style="color:${accent}; font-size:12px; margin-left:6px;">
+                        (${change.diff > 0 ? '+' : ''}${change.diff.toFixed(2)}€)
+                      </span>
+                    </div>
+                    <a href="${change.url}" style="font-size:13px; color:#6c757d;">Voir sur le site</a>
+                  </td>
+                </tr>
                `;
             }
-            htmlContent += '</ul>';
+
+            htmlContent += '</table></div>';
 
             await resend.emails.send({
               from: 'Prixo <onboarding@resend.dev>', // Use verified domain in prod

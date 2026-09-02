@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
+import { getActiveVariant } from '../utils/variants';
 
 interface PriceHistory {
   date: string;
@@ -19,12 +20,16 @@ export function EditPriceHistoryModal({ isOpen, onClose, onSubmit, item }: EditP
 
   useEffect(() => {
     if (item) {
-      setCurrentPrice(item.currentPrice || 0);
-      setHistory(item.history ? [...item.history] : []);
+      // Les corrections manuelles portent sur la couleur actuellement affichée.
+      const active = getActiveVariant(item);
+      setCurrentPrice((active ? active.currentPrice : item.currentPrice) || 0);
+      setHistory(active?.history ? [...active.history] : []);
     }
   }, [item]);
 
   if (!isOpen || !item) return null;
+
+  const activeColor = getActiveVariant(item)?.color || '';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,7 +85,14 @@ export function EditPriceHistoryModal({ isOpen, onClose, onSubmit, item }: EditP
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center p-6 border-b border-[#dee2e6]">
-          <h2 className="text-xl font-semibold text-[#212529]">Modifier les prix</h2>
+          <div>
+            <h2 className="text-xl font-semibold text-[#212529]">Modifier les prix</h2>
+            {activeColor && (
+              <p className="text-sm text-[#6c757d] mt-0.5">
+                <span aria-hidden="true">🇧🇪</span> Prix belge de la couleur « {activeColor} »
+              </p>
+            )}
+          </div>
           <button onClick={onClose} className="p-2 text-[#6c757d] hover:text-[#212529] hover:bg-[#f8f9fa] rounded-full transition-colors">
             <X className="w-5 h-5" />
           </button>
