@@ -111,8 +111,8 @@ export function getVariants(item: any): Variant[] {
       currentPriceFr: typeof v.currentPriceFr === 'number' ? v.currentPriceFr : null,
       history: Array.isArray(v.history) ? v.history : [],
       historyFr: Array.isArray(v.historyFr) ? v.historyFr : [],
-      lastScrapeError: v.lastScrapeError,
-      lastScrapeErrorFr: v.lastScrapeErrorFr,
+      lastScrapeError: v.lastScrapeError ?? null,
+      lastScrapeErrorFr: v.lastScrapeErrorFr ?? null,
     }));
   }
 
@@ -127,8 +127,8 @@ export function getVariants(item: any): Variant[] {
     currentPriceFr: typeof item.currentPriceFr === 'number' ? item.currentPriceFr : null,
     history: Array.isArray(item.history) ? item.history : [],
     historyFr: Array.isArray(item.historyFr) ? item.historyFr : [],
-    lastScrapeError: item.lastScrapeError,
-    lastScrapeErrorFr: item.lastScrapeErrorFr,
+    lastScrapeError: item.lastScrapeError ?? null,
+    lastScrapeErrorFr: item.lastScrapeErrorFr ?? null,
   }];
 }
 
