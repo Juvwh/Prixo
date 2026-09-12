@@ -11,6 +11,14 @@ on:
       - '.github/workflows/deploy-functions.yml'
   workflow_dispatch:
 
+# Un seul deploiement de fonctions a la fois. Deux `firebase deploy` simultanes
+# sur le meme projet font echouer une partie des fonctions avec un laconique
+# "failed to update function" : Google refuse de modifier une fonction pendant
+# qu'une autre operation est en cours dessus.
+concurrency:
+  group: firebase-functions
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
