@@ -93,6 +93,33 @@ async function runPool<T>(
   await Promise.all(runners);
 }
 
+/**
+ * Limite le nombre d'opérations simultanées.
+ * Utilisé pour plafonner les onglets Chromium ouverts en même temps, toutes
+ * fonctions confondues : au-delà, les pages se volent le CPU et expirent.
+ */
+class Semaphore {
+  private readonly waiters: Array<() => void> = [];
+  private active = 0;
+
+  constructor(private readonly limit: number) {}
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.active >= this.limit) {
+      await new Promise<void>(resolve => this.waiters.push(resolve));
+    }
+    this.active++;
+    try {
+      return await task();
+    } finally {
+      this.active--;
+      const next = this.waiters.shift();
+      if (next) next();
+    }
+  }
+}
+
+
 // --- Politesse par domaine --------------------------------------------------
 //
 // Plusieurs articles pointent vers le même site (Ikea, Jysk...). Taper trois
@@ -123,8 +150,21 @@ const USER_AGENT =
 const ACCEPT_LANGUAGE = 'fr-BE,fr;q=0.9,nl-BE;q=0.8,en;q=0.7';
 
 const PAGE_TIMEOUT_MS = 25000;
+// Deuxième tentative : on laisse franchement plus de temps. La plupart des
+// « timeouts » du mail quotidien venaient de sites lents (Ikea, Jysk) qui
+// n'avaient besoin que de quelques secondes de plus.
+const PAGE_TIMEOUT_RETRY_MS = 40000;
 const PRICE_WAIT_MS = 8000;
 const MAX_ATTEMPTS = 2;
+
+// Chaque article charge sa page belge ET sa page française en parallèle, et le
+// passage quotidien traite plusieurs articles à la fois : sans plafond global on
+// se retrouvait avec 8 onglets Chromium concurrents sur un seul cœur. Les pages
+// ne timeoutaient pas parce que les sites étaient lents, mais parce que le CPU
+// était saturé. On borne donc le nombre d'onglets réellement ouverts.
+const MAX_CONCURRENT_PAGES = 6;
+
+const pageSlots = new Semaphore(MAX_CONCURRENT_PAGES);
 
 const BLOCKED_RESOURCE_TYPES = new Set(['image', 'stylesheet', 'font', 'media']);
 
@@ -140,6 +180,21 @@ const BLOCKED_HOST_PATTERNS = [
   /adservice\.google\./i,
   /trustpilot\.com/i,
   /cdn\.cookielaw\.org/i,
+  /googlesyndication\.com/i,
+  /googleadservices\.com/i,
+  /bat\.bing\.com/i,
+  /snap\.licdn\.com/i,
+  /analytics\.tiktok\.com/i,
+  /segment\.(io|com)/i,
+  /newrelic\.com/i,
+  /nr-data\.net/i,
+  /dynamicyield\.com/i,
+  /monetate\.net/i,
+  /optimizely\.com/i,
+  /qualtrics\.com/i,
+  /usercentrics\.eu/i,
+  /cookiebot\.com/i,
+  /\.sitecore(cloud|)\.io\/.*analytics/i,
 ];
 
 // Du plus spécifique au plus générique : le premier candidat exploitable gagne.
@@ -360,9 +415,11 @@ interface ScrapeAttemptResult {
 async function scrapePriceAttempt(url: string, browser: Browser, attempt: number): Promise<ScrapeAttemptResult> {
   let page: any = null;
   try {
+    const navTimeout = attempt === 0 ? PAGE_TIMEOUT_MS : PAGE_TIMEOUT_RETRY_MS;
+
     page = await browser.newPage();
-    page.setDefaultTimeout(PAGE_TIMEOUT_MS);
-    page.setDefaultNavigationTimeout(PAGE_TIMEOUT_MS);
+    page.setDefaultTimeout(navTimeout);
+    page.setDefaultNavigationTimeout(navTimeout);
     await page.setUserAgent(USER_AGENT);
     await page.setExtraHTTPHeaders({ 'Accept-Language': ACCEPT_LANGUAGE });
 
@@ -384,10 +441,27 @@ async function scrapePriceAttempt(url: string, browser: Browser, attempt: number
       }
     });
 
-    // Deuxième tentative : on laisse le réseau se calmer, pour les sites qui
-    // injectent le prix après coup.
-    const waitUntil = attempt === 0 ? 'domcontentloaded' : 'networkidle2';
-    const response = await page.goto(url, { waitUntil, timeout: PAGE_TIMEOUT_MS });
+    // On attend uniquement `domcontentloaded`. L'ancienne deuxième tentative
+    // utilisait `networkidle2`, jamais atteint sur les sites marchands qui
+    // gardent des connexions ouvertes (chat, tracking, lazy-loading) : elle
+    // expirait systématiquement et transformait un site simplement lent en
+    // « Délai d'attente dépassé ».
+    let response: any = null;
+    let navTimedOut = false;
+    try {
+      response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: navTimeout });
+    } catch (navError: any) {
+      if (!/Timeout|timed out/i.test(String(navError?.message || navError))) throw navError;
+      // La navigation n'a pas « fini », mais le document est le plus souvent
+      // déjà rendu : c'est une ressource tierce qui traîne. On tente la lecture
+      // du prix avant de déclarer l'article en échec.
+      navTimedOut = true;
+    }
+
+    // Rien n'a été chargé du tout : inutile d'attendre un prix sur about:blank.
+    if (navTimedOut && !/^https?:/i.test(page.url())) {
+      return { price: null, error: "Délai d'attente dépassé (timeout)", retryable: true };
+    }
 
     const status = response ? response.status() : 0;
     if (status === 403 || status === 429) {
@@ -430,6 +504,9 @@ async function scrapePriceAttempt(url: string, browser: Browser, attempt: number
       if (price !== null) return { price, error: null, retryable: false };
     }
 
+    if (navTimedOut) {
+      return { price: null, error: "Délai d'attente dépassé (timeout)", retryable: true };
+    }
     return { price: null, error: 'Prix introuvable sur la page', retryable: true };
   } catch (error: any) {
     const message = String(error?.message || error);
@@ -475,7 +552,9 @@ async function scrapePrice(
         return { price: null, error: 'Navigateur indisponible sur le serveur' };
       }
 
-      last = await scrapePriceAttempt(url, browser, attempt);
+      // Le sémaphore est pris ici, et jamais autour de `politeWait` : attendre
+      // son tour de politesse ne doit pas immobiliser un onglet.
+      last = await pageSlots.run(() => scrapePriceAttempt(url, browser, attempt));
       if (last.price !== null || !last.retryable) break;
     }
 
@@ -736,7 +815,10 @@ async function scrapeItemVariants(
 // Callable function to refresh all items in a board
 export const refreshBoardItemsPrice = functions
   .region('europe-west1')
-  .runWith({ memory: '2GB', timeoutSeconds: 540 })
+  // 4GB : en gen1 le CPU alloué suit la mémoire. Rendre plusieurs fiches
+  // produit en parallèle à 2GB saturait le processeur et provoquait des
+  // timeouts qui n'avaient rien à voir avec la lenteur des sites.
+  .runWith({ memory: '4GB', timeoutSeconds: 540 })
   .https.onCall(async (data, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
@@ -1346,12 +1428,13 @@ export const hourlyImmoScrape = functions
 // budget de temps explicite, et les articles les plus anciennement relevés
 // passent en premier pour que la couverture tourne d'un jour à l'autre.
 const NIGHTLY_TIME_BUDGET_MS = 430000; // 7 min 10 s de scraping
-const NIGHTLY_ITEM_RESERVE_MS = 45000; // marge pour terminer l'article en cours
+const NIGHTLY_ITEM_RESERVE_MS = 80000; // marge pour terminer l'article en cours (2 tentatives)
 const NIGHTLY_CONCURRENCY = 4;
 
 export const nightlyScrape = functions
   .region('europe-west1')
-  .runWith({ memory: '2GB', timeoutSeconds: 540, secrets: ["RESEND_API_KEY"] })
+  // 4GB : voir refreshBoardItemsPrice, le CPU suit la mémoire en gen1.
+  .runWith({ memory: '4GB', timeoutSeconds: 540, secrets: ["RESEND_API_KEY"] })
   .pubsub.schedule('30 6 * * *') // Every day at 6:30 AM
   .timeZone('Europe/Paris')
   .onRun(async (context) => {
