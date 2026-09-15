@@ -3,6 +3,7 @@ import { X, Lock, Heart, Tag } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { VariantsEditor, VariantDraft, emptyVariantDraft } from './VariantsEditor';
 import { guessBrand } from '../utils/variants';
+import { useModalBehavior, backdropClose } from '../hooks/useModalBehavior';
 
 interface AddItemModalProps {
   isOpen: boolean;
@@ -38,6 +39,8 @@ export function AddItemModal({ isOpen, onClose, onSubmit, boards, initialBoardId
     }
   }, [isOpen, initialBoardId]);
 
+  useModalBehavior(isOpen, onClose);
+
   if (!isOpen) return null;
 
   const handleVariantsChange = (next: VariantDraft[]) => {
@@ -57,7 +60,9 @@ export function AddItemModal({ isOpen, onClose, onSubmit, boards, initialBoardId
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={backdropClose(onClose)}
+    >
       <div className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center p-6 border-b border-[#dee2e6] shrink-0">
           <h2 className="text-xl font-semibold text-[#212529]">Ajouter un article</h2>

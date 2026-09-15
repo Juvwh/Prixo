@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { getActiveVariant } from '../utils/variants';
+import { useModalBehavior, backdropClose } from '../hooks/useModalBehavior';
 
 interface PriceHistory {
   date: string;
@@ -26,6 +27,8 @@ export function EditPriceHistoryModal({ isOpen, onClose, onSubmit, item }: EditP
       setHistory(active?.history ? [...active.history] : []);
     }
   }, [item]);
+
+  useModalBehavior(isOpen, onClose);
 
   if (!isOpen || !item) return null;
 
@@ -82,7 +85,9 @@ export function EditPriceHistoryModal({ isOpen, onClose, onSubmit, item }: EditP
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={backdropClose(onClose)}
+    >
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center p-6 border-b border-[#dee2e6]">
           <div>

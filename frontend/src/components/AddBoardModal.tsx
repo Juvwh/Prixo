@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Lock } from 'lucide-react';
+import { useModalBehavior, backdropClose } from '../hooks/useModalBehavior';
 
 interface AddBoardModalProps {
   isOpen: boolean;
@@ -13,6 +14,8 @@ export function AddBoardModal({ isOpen, onClose, onSubmit }: AddBoardModalProps)
     isPrivate: false,
   });
 
+  useModalBehavior(isOpen, onClose);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -23,7 +26,9 @@ export function AddBoardModal({ isOpen, onClose, onSubmit }: AddBoardModalProps)
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={backdropClose(onClose)}
+    >
       <div className="w-full max-w-sm bg-white rounded-3xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center p-6 border-b border-[#dee2e6]">
           <h2 className="text-xl font-semibold text-[#212529]">Créer un tableau</h2>

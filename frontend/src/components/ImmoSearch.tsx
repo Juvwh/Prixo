@@ -6,6 +6,7 @@ import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '../hooks/useAuth';
 import { AddImmoSearchModal } from './AddImmoSearchModal';
 import { EditImmoSearchModal } from './EditImmoSearchModal';
+import { Toast, ToastMessage } from './Toast';
 
 interface ImmoLink {
   url: string;
@@ -28,6 +29,20 @@ interface ImmoSearchDoc {
   lastError: string | null;
 }
 
+/** Dates de relevé : absentes ou mal formées sur les documents anciens, elles
+ *  affichaient « Invalid Date » au lieu de rester discrètes. */
+function formatDate(value?: string): string {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString('fr-FR') : '—';
+}
+
+function formatDateTime(value?: string): string {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime())
+    ? date.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : 'jamais';
+}
+
 export function ImmoSearch() {
   const { user } = useAuth();
   const [searches, setSearches] = useState<ImmoSearchDoc[]>([]);
@@ -36,13 +51,17 @@ export function ImmoSearch() {
   const [searchToEdit, setSearchToEdit] = useState<ImmoSearchDoc | null>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isGlobalRefreshing, setIsGlobalRefreshing] = useState(false);
-  const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const [notification, setNotification] = useState<ToastMessage | null>(null);
+  const notificationTimer = React.useRef<number | undefined>(undefined);
   const [showIgnored, setShowIgnored] = useState(false);
 
-  const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+  const showNotification = (message: string, type: ToastMessage['type'] = 'info') => {
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 4000);
+    window.clearTimeout(notificationTimer.current);
+    notificationTimer.current = window.setTimeout(() => setNotification(null), 4500);
   };
+
+  useEffect(() => () => window.clearTimeout(notificationTimer.current), []);
 
   useEffect(() => {
     if (!user) return;
@@ -241,15 +260,7 @@ export function ImmoSearch() {
 
   return (
     <div className="w-full">
-      {notification && (
-        <div className={`fixed top-6 right-6 p-4 rounded-xl shadow-lg z-[100] animate-in fade-in slide-in-from-top-5 duration-300 ${
-          notification.type === 'success' ? 'bg-[#a8d5ba] text-[#212529]' :
-          notification.type === 'error' ? 'bg-red-500 text-white' :
-          'bg-[#212529] text-white'
-        }`}>
-          {notification.message}
-        </div>
-      )}
+      <Toast toast={notification} onDismiss={() => setNotification(null)} />
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
         <div>
@@ -257,7 +268,7 @@ export function ImmoSearch() {
           <p className="text-[#6c757d] mt-2">Suivez automatiquement l'apparition de nouveaux biens immobiliers.</p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <button
             onClick={() => handleRefresh()}
             disabled={isGlobalRefreshing}
@@ -286,13 +297,13 @@ export function ImmoSearch() {
           {allUnreadLinks.length > 0 ? (
             <div className="space-y-3">
               {allUnreadLinks.map((item, idx) => (
-                <div key={idx} className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm flex flex-col hover:shadow-md transition-shadow">
+                <div key={`${item.searchId}:${item.link.url}`} className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm flex flex-col hover:shadow-md transition-shadow">
                    <div className="flex justify-between items-center mb-2 gap-2">
                       <div className="flex items-center gap-2 overflow-hidden">
-                        <span className="text-sm font-bold text-[#212529] whitespace-nowrap">Bien #{idx + 1}</span>
+                        <span className="text-sm font-bold text-[#212529] whitespace-nowrap">Bien {idx + 1}</span>
                         <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full truncate">{item.searchName}</span>
                       </div>
-                      <span className="text-[10px] text-gray-400 whitespace-nowrap">{new Date(item.link.addedAt).toLocaleDateString('fr-FR')}</span>
+                      <span className="text-[10px] text-gray-400 whitespace-nowrap">{formatDate(item.link.addedAt)}</span>
                    </div>
 
                    <a href={item.link.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-600 hover:text-blue-600 truncate mb-3">
@@ -328,13 +339,13 @@ export function ImmoSearch() {
           {favoritesAndKeptLinks.length > 0 ? (
             <div className="space-y-3">
               {favoritesAndKeptLinks.map((item, idx) => (
-                <div key={idx} className={`p-4 rounded-xl border shadow-sm flex flex-col ${item.link.isFavorite ? 'bg-red-50 border-red-100' : 'bg-white border-gray-200'}`}>
+                <div key={`${item.searchId}:${item.link.url}`} className={`p-4 rounded-xl border shadow-sm flex flex-col ${item.link.isFavorite ? 'bg-red-50 border-red-100' : 'bg-white border-gray-200'}`}>
                    <div className="flex justify-between items-center mb-2 gap-2">
                       <div className="flex items-center gap-2 overflow-hidden">
-                        <span className="text-sm font-bold text-[#212529] whitespace-nowrap">Bien #{idx + 1}</span>
+                        <span className="text-sm font-bold text-[#212529] whitespace-nowrap">Bien {idx + 1}</span>
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full truncate ${item.link.isFavorite ? 'text-red-600 bg-red-100' : 'text-gray-600 bg-gray-100'}`}>{item.searchName}</span>
                       </div>
-                      <span className="text-[10px] text-gray-400 whitespace-nowrap">{new Date(item.link.addedAt).toLocaleDateString('fr-FR')}</span>
+                      <span className="text-[10px] text-gray-400 whitespace-nowrap">{formatDate(item.link.addedAt)}</span>
                    </div>
 
                    <a href={item.link.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-600 hover:text-blue-600 truncate mb-3">
@@ -385,13 +396,13 @@ export function ImmoSearch() {
         {showIgnored && allIgnoredLinks.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             {allIgnoredLinks.map((item, idx) => (
-              <div key={idx} className="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col opacity-75 hover:opacity-100 transition-opacity">
+              <div key={`${item.searchId}:${item.link.url}`} className="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col opacity-75 hover:opacity-100 transition-opacity">
                  <div className="flex justify-between items-center mb-2 gap-2">
                     <div className="flex items-center gap-2 overflow-hidden">
-                      <span className="text-sm font-bold text-gray-500 whitespace-nowrap">Bien #{idx + 1}</span>
+                      <span className="text-sm font-bold text-gray-500 whitespace-nowrap">Bien {idx + 1}</span>
                       <span className="text-[10px] font-semibold text-gray-600 bg-gray-200 px-2 py-0.5 rounded-full truncate">{item.searchName}</span>
                     </div>
-                    <span className="text-[10px] text-gray-400 whitespace-nowrap">{new Date(item.link.addedAt).toLocaleDateString('fr-FR')}</span>
+                    <span className="text-[10px] text-gray-400 whitespace-nowrap">{formatDate(item.link.addedAt)}</span>
                  </div>
 
                  <a href={item.link.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-500 line-through hover:text-blue-600 truncate mb-3">
@@ -450,7 +461,7 @@ export function ImmoSearch() {
                   )}
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600 font-medium">{search.links.length} biens trouvés</span>
-                    <span className="text-xs text-gray-400">MàJ : {new Date(search.lastChecked).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                    <span className="text-xs text-gray-400">MàJ : {formatDateTime(search.lastChecked)}</span>
                   </div>
                 </div>
               </div>

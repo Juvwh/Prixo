@@ -29,6 +29,10 @@ export interface Variant {
 
 export const DEFAULT_VARIANT_ID = 'default';
 
+/** Visuel de repli quand un article n'a pas d'image renseignée. */
+export const FALLBACK_IMAGE =
+  'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80';
+
 export function newVariantId(): string {
   return `v_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }

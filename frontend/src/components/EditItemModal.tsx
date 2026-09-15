@@ -3,6 +3,7 @@ import { X, Lock, Heart, Tag } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { VariantsEditor, VariantDraft, emptyVariantDraft } from './VariantsEditor';
 import { getVariants, deriveFrUrl } from '../utils/variants';
+import { useModalBehavior, backdropClose } from '../hooks/useModalBehavior';
 
 interface EditItemModalProps {
   isOpen: boolean;
@@ -57,6 +58,8 @@ export function EditItemModal({ isOpen, onClose, onSubmit, item, boards }: EditI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, item?.id]);
 
+  useModalBehavior(isOpen, onClose);
+
   if (!isOpen || !item) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -66,7 +69,9 @@ export function EditItemModal({ isOpen, onClose, onSubmit, item, boards }: EditI
   };
 
   return (
-    <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={backdropClose(onClose)}
+    >
       <div className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center p-6 border-b border-[#dee2e6] shrink-0">
           <h2 className="text-xl font-semibold text-[#212529]">Modifier l'article</h2>

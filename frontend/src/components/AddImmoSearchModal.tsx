@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Search } from 'lucide-react';
+import { useModalBehavior, backdropClose } from '../hooks/useModalBehavior';
 
 interface AddImmoSearchModalProps {
   isOpen: boolean;
@@ -11,6 +12,8 @@ export function AddImmoSearchModal({ isOpen, onClose, onSubmit }: AddImmoSearchM
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [filterWord, setFilterWord] = useState('');
+
+  useModalBehavior(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -24,7 +27,9 @@ export function AddImmoSearchModal({ isOpen, onClose, onSubmit }: AddImmoSearchM
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-[60]">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-[60]"
+      onClick={backdropClose(onClose)}
+    >
       <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="flex justify-between items-center p-6 border-b border-gray-100">
           <h2 className="text-xl font-bold text-[#212529] flex items-center">

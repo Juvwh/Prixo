@@ -5,7 +5,8 @@ import { cn } from '../utils/cn';
 import { DualPrice } from './DualPrice';
 import { ColorSwatches } from './ColorSwatches';
 import { LowestPrice } from './LowestPrice';
-import { getVariants, getActiveVariant, getLowestPoint, formatPrice, PricePoint } from '../utils/variants';
+import { getVariants, getActiveVariant, getLowestPoint, formatPrice, formatHistoryDate, FALLBACK_IMAGE, PricePoint } from '../utils/variants';
+import { useModalBehavior, backdropClose } from '../hooks/useModalBehavior';
 
 interface ItemDetailModalProps {
   isOpen: boolean;
@@ -17,7 +18,6 @@ interface ItemDetailModalProps {
   onEditPriceHistory: () => void;
   onSelectVariant?: (itemId: string, variantId: string) => void;
   isRefreshing?: boolean;
-  notification?: { message: string, type: 'success' | 'info' | 'error' } | null;
 }
 
 /**
@@ -40,7 +40,9 @@ function mergeHistories(be: PricePoint[], fr: PricePoint[]) {
   });
 }
 
-export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, onEdit, onEditPriceHistory, onSelectVariant, isRefreshing, notification }: ItemDetailModalProps) {
+export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, onEdit, onEditPriceHistory, onSelectVariant, isRefreshing }: ItemDetailModalProps) {
+  useModalBehavior(isOpen, onClose);
+
   if (!isOpen || !item) return null;
 
   const variants = getVariants(item);
@@ -58,8 +60,20 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
   const shownPrice = active ? active.currentPrice : item.currentPrice;
   const lowestBe = getLowestPoint(historyBe);
 
+  // `lastChecked` manque sur les articles créés avant le premier relevé :
+  // `new Date(undefined)` affichait alors « Invalid Date » dans la fiche.
+  const lastCheckedDate = item.lastChecked ? new Date(item.lastChecked) : null;
+  const lastCheckedLabel =
+    lastCheckedDate && !Number.isNaN(lastCheckedDate.getTime())
+      ? lastCheckedDate.toLocaleDateString('fr-FR', {
+          day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+        })
+      : '';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/40 backdrop-blur-sm"
+      onClick={backdropClose(onClose)}
+    >
       <div className="w-full max-w-3xl bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
 
         {/* Header */}
@@ -86,8 +100,9 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
             <div className="space-y-6">
               <div className="aspect-square rounded-2xl overflow-hidden bg-[#f8f9fa] border border-[#dee2e6]">
                 <img
-                  src={shownImage || "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"}
+                  src={shownImage || FALLBACK_IMAGE}
                   alt={item.name}
+                  loading="lazy"
                   className="w-full h-full object-contain"
                 />
               </div>
@@ -106,7 +121,8 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                 </div>
               )}
 
-              <div className="flex gap-3">
+              <div className="flex flex-col sm:flex-row gap-3">
+                {shownUrl && (
                 <a
                   href={shownUrl}
                   target="_blank"
@@ -116,6 +132,7 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                   <ExternalLink className="w-4 h-4 mr-2" />
                   <span aria-hidden="true" className="mr-1.5">🇧🇪</span> Site belge
                 </a>
+                )}
                 {shownUrlFr && (
                   <a
                     href={shownUrlFr}
@@ -137,21 +154,6 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                 <RefreshCw className={cn("w-4 h-4 mr-2", isRefreshing && "animate-spin")} />
                 Actualiser les prix
               </button>
-
-              {/* Notification Message */}
-              {notification && (
-                <div className={cn(
-                  "p-3 rounded-xl text-sm font-medium flex items-center animate-in fade-in slide-in-from-top-2",
-                  notification.type === 'success' && "bg-green-50 text-green-700 border border-green-200",
-                  notification.type === 'info' && "bg-blue-50 text-blue-700 border border-blue-200",
-                  notification.type === 'error' && "bg-red-50 text-red-700 border border-red-200"
-                )}>
-                  {notification.type === 'success' && <CheckCircle2 className="w-4 h-4 mr-2" />}
-                  {notification.type === 'info' && <RefreshCw className="w-4 h-4 mr-2" />}
-                  {notification.type === 'error' && <AlertTriangle className="w-4 h-4 mr-2" />}
-                  {notification.message}
-                </div>
-              )}
 
               <div className="flex justify-end space-x-2 mt-4">
                  <button onClick={onEdit} className="p-2 text-[#6c757d] hover:text-[#212529] hover:bg-[#f8f9fa] rounded-lg transition-colors" title="Modifier">
@@ -205,7 +207,10 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                   className="mt-4"
                 />
 
-                <p className="text-sm text-[#6c757d] mt-3">Dernière vérification : {new Date(item.lastChecked).toLocaleDateString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+                <p className="text-sm text-[#6c757d] mt-3">
+                  Dernière vérification :{' '}
+                  {lastCheckedLabel || <span className="italic">jamais</span>}
+                </p>
               </div>
 
               <div className="flex-1 min-h-[300px] border border-[#dee2e6] rounded-2xl p-4 sm:p-6 bg-[#f8f9fa]">

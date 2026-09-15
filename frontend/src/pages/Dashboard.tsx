@@ -32,14 +32,42 @@ import {
 } from '@dnd-kit/sortable';
 import { useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Trash2, ListChecks, Bell, ChevronDown, Combine } from 'lucide-react';
+import {
+  ListChecks, Bell, ChevronDown, Combine, Search, X, Check,
+  TrendingDown, PackagePlus, Inbox, ArrowDownUp, Eye, EyeOff,
+} from 'lucide-react';
+import { Toast, ToastMessage } from '../components/Toast';
+import { useClickOutside } from '../hooks/useClickOutside';
+import { cn } from '../utils/cn';
 import {
   getVariants,
   getActiveVariant,
+  getLowestPoint,
+  formatPrice,
+  FALLBACK_IMAGE,
   draftsToVariants,
   mirrorOfVariant,
   newVariantId,
 } from '../utils/variants';
+
+type SortKey =
+  | 'custom'
+  | 'date_desc'
+  | 'favorites_first'
+  | 'last_change_desc'
+  | 'price_asc'
+  | 'price_desc';
+
+/** Les tris proposés, dans l'ordre du menu. Une seule source pour le menu et
+ *  pour le libellé rappelé sur le bouton. */
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'custom', label: 'Ordre personnalisé' },
+  { key: 'date_desc', label: "Date d'ajout" },
+  { key: 'favorites_first', label: 'Coups de cœur en premier' },
+  { key: 'last_change_desc', label: 'Dernier changement de prix' },
+  { key: 'price_asc', label: 'Prix croissant' },
+  { key: 'price_desc', label: 'Prix décroissant' },
+];
 
 export function Dashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -61,8 +89,15 @@ export function Dashboard() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isBellOpen, setIsBellOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [sortBy, setSortBy] = useState<'custom' | 'date_desc' | 'favorites_first' | 'last_change_desc' | 'price_asc' | 'price_desc'>('custom');
+  const [sortBy, setSortBy] = useState<SortKey>('custom');
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  // Tant que le premier instantané Firestore n'est pas arrivé, une grille vide
+  // et « aucun article » sont indiscernables : on affiche des squelettes.
+  const [isLoadingItems, setIsLoadingItems] = useState(true);
+
+  const sortMenuRef = useClickOutside<HTMLDivElement>(isSortMenuOpen, () => setIsSortMenuOpen(false));
+  const bellRef = useClickOutside<HTMLDivElement>(isBellOpen, () => setIsBellOpen(false));
 
   // Couleur affichée par article. La sélection est propre à chaque utilisateur :
   // les règles Firestore réservent l'écriture d'un article à son créateur, et un
@@ -106,6 +141,11 @@ export function Dashboard() {
       const fetchedItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       // Skip sorting here, it's handled by the display logic.
       setItems(fetchedItems);
+      setIsLoadingItems(false);
+    }, (error) => {
+      console.error('Error loading items: ', error);
+      setIsLoadingItems(false);
+      showNotification("Impossible de charger les articles.", 'error');
     });
     return unsubscribe;
   }, [user, userProfile]);
@@ -143,9 +183,9 @@ export function Dashboard() {
       )
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedBoards = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const fetchedBoards = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       // Sort alphabetically by name
-      fetchedBoards.sort((a, b) => a.name.localeCompare(b.name));
+      fetchedBoards.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setBoardsData(fetchedBoards);
     });
     return unsubscribe;
@@ -228,12 +268,18 @@ export function Dashboard() {
     }
   };
 
-  const [notification, setNotification] = useState<{ message: string, type: 'success' | 'info' | 'error' } | null>(null);
+  const [notification, setNotification] = useState<ToastMessage | null>(null);
+  const notificationTimer = React.useRef<number | undefined>(undefined);
 
-  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'info') => {
+  const showNotification = (message: string, type: ToastMessage['type'] = 'info') => {
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 4000);
+    // Un message chassant l'autre, le minuteur précédent doit être annulé :
+    // sinon le second bandeau disparaissait au bout du reliquat du premier.
+    window.clearTimeout(notificationTimer.current);
+    notificationTimer.current = window.setTimeout(() => setNotification(null), 4500);
   };
+
+  useEffect(() => () => window.clearTimeout(notificationTimer.current), []);
 
   const handleRefreshItem = async (id: string) => {
     setIsRefreshing(true);
@@ -579,6 +625,23 @@ export function Dashboard() {
 
   const unreadCount = getUnreadCount();
 
+  // La recherche porte sur le nom, la marque et les noms de couleurs : c'est
+  // ainsi qu'on retrouve un article dans un tableau qui en compte cinquante.
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  const matchesSearch = (item: any) => {
+    if (!normalizedQuery) return true;
+    const haystack = [
+      item.name,
+      item.brand,
+      ...getVariants(item).map(v => v.color),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(normalizedQuery);
+  };
+
   // Filter and sort items based on selected board
   let displayedItems = items.filter(item => {
     let matchesBoard = true;
@@ -591,7 +654,7 @@ export function Dashboard() {
        return false;
     }
 
-    return true;
+    return matchesSearch(item);
   });
 
   // Apply sorting
@@ -762,6 +825,9 @@ export function Dashboard() {
     return "Tous les articles";
   };
 
+  const currentSortLabel =
+    SORT_OPTIONS.find(option => option.key === sortBy)?.label ?? 'Trier';
+
   const isSelectionActive = isSelectionModeActive && selectedItemIds.length > 0;
 
   const totalValue = isSelectionActive
@@ -771,6 +837,21 @@ export function Dashboard() {
     : displayedItems.reduce((sum, item) => sum + (item.currentPrice || 0), 0);
 
   const formattedTotal = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(totalValue);
+
+  // Deux repères lus d'un coup d'œil au-dessus de la grille :
+  //  - combien d'articles ont baissé lors de leur dernier relevé ;
+  //  - ce que coûterait aujourd'hui le tableau si chaque article retrouvait son
+  //    prix plancher — c'est la marge de négociation qu'il reste à attendre.
+  const droppedCount = displayedItems.filter(item => getPriceDifference(item) < 0).length;
+
+  const gapToLowest = displayedItems.reduce((sum, item) => {
+    const shown = withSelectedVariant(item);
+    const variant = getActiveVariant(shown);
+    const lowest = getLowestPoint(variant?.history || shown.history);
+    const current = variant ? variant.currentPrice : shown.currentPrice;
+    if (!lowest || typeof current !== 'number' || current <= 0) return sum;
+    return sum + Math.max(0, current - lowest.price);
+  }, 0);
 
   const handleToggleSelectionMode = () => {
     setIsSelectionModeActive(!isSelectionModeActive);
@@ -857,83 +938,127 @@ export function Dashboard() {
           ) : (
              <>
           <header className="mb-8">
-            <div className="flex items-center gap-4 mb-2">
-              <h2 className="text-3xl font-bold text-[#212529] tracking-tight">{getPageTitle()}</h2>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-5">
+              <h2 className="text-2xl sm:text-3xl font-bold text-[#212529] tracking-tight">{getPageTitle()}</h2>
+              {!isLoadingItems && (
+                <span className="text-sm font-medium text-[#6c757d] bg-white border border-[#dee2e6] px-2.5 py-1 rounded-full">
+                  {displayedItems.length} article{displayedItems.length > 1 ? 's' : ''}
+                </span>
+              )}
             </div>
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="inline-flex items-center px-4 py-2 bg-[#eef2f0] rounded-xl text-[#212529]">
-                <span className="text-sm font-medium mr-2">
-                  {isSelectionActive ? "Valeur sélectionnée :" : "Valeur cumulée :"}
+            {/* Bandeau de repères : valeur cumulée, baisses récentes, écart au plus bas. */}
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
+              <div className="col-span-2 lg:col-span-1 flex flex-col justify-center px-4 py-3 bg-[#eef2f0] rounded-2xl">
+                <span className="text-xs font-medium text-[#4a7c59] uppercase tracking-wider">
+                  {isSelectionActive ? 'Valeur sélectionnée' : 'Valeur cumulée'}
                 </span>
-                <span className="text-lg font-bold">{formattedTotal}</span>
+                <span className="text-2xl font-bold text-[#212529] tabular-nums mt-0.5">{formattedTotal}</span>
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex flex-col justify-center px-4 py-3 bg-white border border-[#dee2e6] rounded-2xl">
+                <span className="text-xs font-medium text-[#6c757d] uppercase tracking-wider">Baisses récentes</span>
+                <span className="flex items-center gap-1.5 text-2xl font-bold text-[#212529] tabular-nums mt-0.5">
+                  {droppedCount > 0 && <TrendingDown className="w-5 h-5 text-[#4a7c59]" />}
+                  {droppedCount}
+                </span>
+              </div>
+
+              <div
+                className="flex flex-col justify-center px-4 py-3 bg-white border border-[#dee2e6] rounded-2xl"
+                title="Somme des écarts entre le prix actuel et le prix le plus bas jamais relevé"
+              >
+                <span className="text-xs font-medium text-[#6c757d] uppercase tracking-wider">Écart au plus bas</span>
+                <span className="text-2xl font-bold text-[#212529] tabular-nums mt-0.5">{formatPrice(gapToLowest)}</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+              {/* Recherche */}
+              <div className="relative flex-1 lg:max-w-xs">
+                <Search className="w-4 h-4 text-[#6c757d] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Rechercher un article, une marque..."
+                  aria-label="Rechercher un article"
+                  className="w-full pl-10 pr-9 py-2.5 text-sm rounded-xl border border-[#dee2e6] bg-white focus:ring-2 focus:ring-[#a8d5ba] focus:border-transparent outline-none transition-all"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    aria-label="Effacer la recherche"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#adb5bd] hover:text-[#212529] rounded-md transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5 sm:gap-2 lg:ml-auto">
                 {/* Sort Menu */}
-                <div className="relative">
+                <div className="relative" ref={sortMenuRef}>
                   <button
                     onClick={() => setIsSortMenuOpen(!isSortMenuOpen)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-[#6c757d] hover:text-[#212529] hover:bg-gray-100 rounded-lg transition-colors"
+                    aria-haspopup="menu"
+                    aria-expanded={isSortMenuOpen}
+                    className={cn(
+                      'flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-xl border transition-colors',
+                      isSortMenuOpen
+                        ? 'bg-[#eef2f0] border-[#a8d5ba] text-[#212529]'
+                        : 'bg-white border-[#dee2e6] text-[#6c757d] hover:text-[#212529] hover:bg-[#f8f9fa]'
+                    )}
                   >
-                    Trier
-                    <ChevronDown size={16} />
+                    <ArrowDownUp size={16} className="shrink-0" />
+                    <span className="hidden sm:inline max-w-[11rem] truncate">{currentSortLabel}</span>
+                    <ChevronDown size={16} className={cn('shrink-0 transition-transform', isSortMenuOpen && 'rotate-180')} />
                   </button>
 
                   {isSortMenuOpen && (
-                    <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                      <div className="py-1">
-                        <button
-                          onClick={() => { setSortBy('custom'); setIsSortMenuOpen(false); }}
-                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'custom' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
-                        >
-                          Ordre personnalisé
-                        </button>
-                        <button
-                          onClick={() => { setSortBy('date_desc'); setIsSortMenuOpen(false); }}
-                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'date_desc' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
-                        >
-                          Date d'ajout
-                        </button>
-                        <button
-                          onClick={() => { setSortBy('favorites_first'); setIsSortMenuOpen(false); }}
-                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'favorites_first' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
-                        >
-                          Coups de cœur en premier
-                        </button>
-                        <button
-                          onClick={() => { setSortBy('last_change_desc'); setIsSortMenuOpen(false); }}
-                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'last_change_desc' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
-                        >
-                          Dernier changement de prix
-                        </button>
-                        <button
-                          onClick={() => { setSortBy('price_asc'); setIsSortMenuOpen(false); }}
-                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'price_asc' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
-                        >
-                          Prix croissant
-                        </button>
-                        <button
-                          onClick={() => { setSortBy('price_desc'); setIsSortMenuOpen(false); }}
-                          className={`w-full text-left px-4 py-2 text-sm ${sortBy === 'price_desc' ? 'bg-[#eef2f0] font-medium text-[#212529]' : 'text-[#6c757d] hover:bg-gray-50'}`}
-                        >
-                          Prix décroissant
-                        </button>
+                    <div
+                      role="menu"
+                      className="absolute right-0 mt-2 w-60 bg-white border border-[#dee2e6] rounded-2xl shadow-[0_18px_40px_-12px_rgb(33_37_41/0.22)] z-50 overflow-hidden animate-in fade-in slide-in-from-top-2"
+                    >
+                      <div className="py-1.5">
+                        {SORT_OPTIONS.map(option => (
+                          <button
+                            key={option.key}
+                            role="menuitemradio"
+                            aria-checked={sortBy === option.key}
+                            onClick={() => { setSortBy(option.key); setIsSortMenuOpen(false); }}
+                            className={cn(
+                              'w-full flex items-center justify-between gap-2 text-left px-4 py-2.5 text-sm transition-colors',
+                              sortBy === option.key
+                                ? 'bg-[#eef2f0] font-semibold text-[#212529]'
+                                : 'text-[#6c757d] hover:bg-[#f8f9fa] hover:text-[#212529]'
+                            )}
+                          >
+                            {option.label}
+                            {sortBy === option.key && <Check size={16} className="text-[#4a7c59] shrink-0" />}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}
                 </div>
 
                 {/* Bell Icon */}
-                <div className="relative">
+                <div className="relative" ref={bellRef}>
                   <button
                     onClick={handleBellClick}
-                    className="p-2 rounded-full text-[#6c757d] hover:bg-gray-100 transition-colors relative"
+                    className={cn(
+                      'p-2.5 rounded-xl border transition-colors relative',
+                      isBellOpen
+                        ? 'bg-[#eef2f0] border-[#a8d5ba] text-[#212529]'
+                        : 'bg-white border-[#dee2e6] text-[#6c757d] hover:text-[#212529] hover:bg-[#f8f9fa]'
+                    )}
+                    aria-label={`Notifications de prix${unreadCount > 0 ? ` (${unreadCount} non lues)` : ''}`}
                     title="Notifications de prix"
                   >
                     <Bell size={20} />
                     {unreadCount > 0 && (
-                      <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-[#f8f9fa]">
+                      <span className="absolute -top-1.5 -right-1.5 min-w-[1.25rem] h-5 px-1 bg-[#4a7c59] text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-[#f8f9fa]">
                         {unreadCount}
                       </span>
                     )}
@@ -941,15 +1066,16 @@ export function Dashboard() {
 
                   {/* Bell Popover */}
                   {isBellOpen && (
-                    <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                      <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                    <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] bg-white border border-[#dee2e6] rounded-2xl shadow-[0_18px_40px_-12px_rgb(33_37_41/0.22)] z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div className="p-3 border-b border-[#f1f3f5] bg-[#fafafa] flex justify-between items-center">
                         <span className="font-semibold text-sm text-[#212529]">Historique des prix</span>
                         <span className="text-xs text-[#6c757d]">10 derniers</span>
                       </div>
                       <div className="max-h-80 overflow-y-auto p-2">
                         {notificationHistory.length === 0 ? (
-                          <div className="text-center py-6 text-sm text-[#6c757d]">
-                            Aucun historique disponible.
+                          <div className="text-center py-8 px-4">
+                            <Bell className="w-8 h-8 text-[#dee2e6] mx-auto mb-2" />
+                            <p className="text-sm text-[#6c757d]">Aucun changement de prix pour l'instant.</p>
                           </div>
                         ) : (
                           notificationHistory.map((item) => {
@@ -961,17 +1087,23 @@ export function Dashboard() {
                             const isUnread = frozenReadAtMs !== null && changeDateMs > frozenReadAtMs;
 
                             return (
-                              <div
+                              <button
                                 key={item.id}
-                                className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors mb-1
-                                  ${isUnread
-                                    ? 'bg-yellow-50 hover:bg-yellow-100 ring-1 ring-yellow-400 shadow-sm'
-                                    : 'hover:bg-gray-50 opacity-75 grayscale-[0.3]'
-                                  }
-                                `}
+                                type="button"
+                                className={cn(
+                                  'w-full text-left flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-colors mb-1',
+                                  isUnread
+                                    ? 'bg-[#eef2f0] hover:bg-[#e3ebe6] ring-1 ring-[#a8d5ba]'
+                                    : 'hover:bg-[#f8f9fa]'
+                                )}
                                 onClick={() => { setIsBellOpen(false); setFrozenReadAtMs(null); setSelectedItem(item); }}
                               >
-                                <img src={item.imageUrl} alt={item.name} className="w-12 h-12 object-contain rounded bg-white border border-gray-200" />
+                                <img
+                                  src={item.imageUrl || FALLBACK_IMAGE}
+                                  alt=""
+                                  loading="lazy"
+                                  className="w-12 h-12 object-contain rounded-lg bg-white border border-[#dee2e6] shrink-0"
+                                />
                                 <div className="flex-1 min-w-0">
                                   {item.brand && (
                                     <p className="text-[10px] font-bold uppercase tracking-wider text-[#6c757d] truncate">{item.brand}</p>
@@ -981,16 +1113,21 @@ export function Dashboard() {
                                     {change?.color && <span className="text-[#6c757d] font-normal"> — {change.color}</span>}
                                   </p>
                                   <div className="flex items-center gap-2 mt-1">
-                                    <span className={`text-sm font-bold ${isUnread ? 'text-[#212529]' : 'text-[#495057]'}`}>{change?.price ?? item.currentPrice}€</span>
-                                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${isDrop ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} ${!isUnread && 'opacity-80'}`}>
+                                    <span className="text-sm font-bold text-[#212529] tabular-nums">
+                                      {formatPrice(change?.price ?? item.currentPrice)}
+                                    </span>
+                                    <span className={cn(
+                                      'text-xs font-semibold px-1.5 py-0.5 rounded-md tabular-nums',
+                                      isDrop ? 'bg-[#eef2f0] text-[#4a7c59]' : 'bg-red-50 text-red-600'
+                                    )}>
                                       {isDrop ? '' : '+'}{diff.toFixed(2)}€
                                     </span>
                                   </div>
                                 </div>
                                 {isUnread && (
-                                  <div className="w-2 h-2 rounded-full bg-yellow-500 shrink-0 self-start mt-2"></div>
+                                  <span className="w-2 h-2 rounded-full bg-[#4a7c59] shrink-0 self-start mt-2" />
                                 )}
-                              </div>
+                              </button>
                             );
                           })
                         )}
@@ -999,42 +1136,50 @@ export function Dashboard() {
                   )}
                 </div>
 
-                <div className="flex items-center">
-                  <span className="text-sm font-medium text-[#6c757d] mr-3">Afficher mes articles privés</span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="sr-only peer"
-                      checked={showPrivateItems}
-                      onChange={e => setShowPrivateItems(e.target.checked)}
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#a8d5ba]"></div>
-                  </label>
-                </div>
+                {/* Articles privés */}
+                <button
+                  onClick={() => setShowPrivateItems(!showPrivateItems)}
+                  aria-pressed={showPrivateItems}
+                  title={showPrivateItems ? 'Masquer mes articles privés' : 'Afficher mes articles privés'}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors',
+                    showPrivateItems
+                      ? 'bg-[#eef2f0] border-[#a8d5ba] text-[#212529]'
+                      : 'bg-white border-[#dee2e6] text-[#6c757d] hover:text-[#212529] hover:bg-[#f8f9fa]'
+                  )}
+                >
+                  {showPrivateItems ? <Eye size={20} /> : <EyeOff size={20} />}
+                  <span className="hidden xl:inline">Articles privés</span>
+                </button>
 
                 <button
                   onClick={handleToggleSelectionMode}
-                  className={`p-2 rounded-full transition-colors flex items-center justify-center ${
-                    isSelectionModeActive ? 'bg-[#a8d5ba] text-white shadow-md' : 'text-[#6c757d] hover:bg-gray-100'
-                  }`}
+                  aria-pressed={isSelectionModeActive}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors',
+                    isSelectionModeActive
+                      ? 'bg-[#212529] border-[#212529] text-white'
+                      : 'bg-white border-[#dee2e6] text-[#6c757d] hover:text-[#212529] hover:bg-[#f8f9fa]'
+                  )}
                   title="Mode sélection"
                 >
                   <ListChecks size={20} />
+                  <span className="hidden xl:inline">Sélection</span>
                 </button>
               </div>
             </div>
 
             {isSelectionModeActive && (
-              <div className="flex items-center gap-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-4 p-3 bg-white border border-[#dee2e6] rounded-2xl animate-in fade-in slide-in-from-top-2">
                 <button
                   onClick={handleSelectAll}
-                  className="text-sm font-medium text-[#212529] bg-white border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+                  className="text-sm font-medium text-[#212529] bg-[#f8f9fa] border border-[#dee2e6] px-3 py-1.5 rounded-lg hover:bg-[#eef2f0] transition-colors"
                 >
                   Tout sélectionner
                 </button>
                 <button
                   onClick={handleClearSelection}
-                  className="text-sm font-medium text-[#6c757d] hover:text-[#212529] px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="text-sm font-medium text-[#6c757d] hover:text-[#212529] px-3 py-1.5 rounded-lg hover:bg-[#f8f9fa] transition-colors"
                 >
                   Tout désélectionner
                 </button>
@@ -1042,37 +1187,48 @@ export function Dashboard() {
                   onClick={handleMergeSelectedItems}
                   disabled={selectedItemIds.length < 2}
                   title="Regrouper les articles sélectionnés en un seul, une couleur par article"
-                  className="flex items-center gap-2 text-sm font-medium text-[#212529] bg-white border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 text-sm font-medium text-[#212529] bg-[#f8f9fa] border border-[#dee2e6] px-3 py-1.5 rounded-lg hover:bg-[#eef2f0] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Combine size={16} />
                   Regrouper les couleurs
                 </button>
-                <span className="text-sm text-[#6c757d] ml-auto">
-                  {selectedItemIds.length} article(s) sélectionné(s)
+                <span className="text-sm text-[#6c757d] w-full sm:w-auto sm:ml-auto">
+                  {selectedItemIds.length} article{selectedItemIds.length > 1 ? 's' : ''} sélectionné{selectedItemIds.length > 1 ? 's' : ''}
                 </span>
               </div>
             )}
 
             {!isSelectionModeActive && (
-               <p className="text-[#6c757d] mt-4">Suivez l'évolution des prix de vos articles favoris.</p>
+               <p className="text-[#6c757d] text-sm mt-4">
+                 Suivez l'évolution des prix de vos articles favoris.
+                 <span className="hidden md:inline"> Glissez une carte sur un tableau de la barre latérale pour l'y ranger.</span>
+               </p>
             )}
           </header>
 
-          <SortableContext
-             items={displayedItems.map(i => i.id)}
-             strategy={verticalListSortingStrategy}
-          >
-            <Masonry
-              breakpointCols={breakpointColumnsObj}
-              className="flex w-auto -ml-6"
-              columnClassName="pl-6 bg-clip-padding"
+          {isLoadingItems ? (
+            <ItemsSkeleton breakpointCols={breakpointColumnsObj} />
+          ) : displayedItems.length === 0 ? (
+            /* L'état vide était rendu *dans* la grille Masonry, qui est un
+               conteneur flex de colonnes : le message atterrissait dans une
+               colonne étroite, décalé sur la gauche. Il vit désormais en dehors
+               de la grille, centré, et propose l'action attendue. */
+            <EmptyState
+              hasQuery={!!normalizedQuery}
+              onClearQuery={() => setSearchQuery('')}
+              onAdd={() => setIsAddModalOpen(true)}
+            />
+          ) : (
+            <SortableContext
+               items={displayedItems.map(i => i.id)}
+               strategy={verticalListSortingStrategy}
             >
-              {displayedItems.length === 0 ? (
-                <div className="col-span-full text-center py-20 text-[#6c757d]">
-                  Aucun article dans ce tableau.
-                </div>
-              ) : (
-                displayedItems.map(item => (
+              <Masonry
+                breakpointCols={breakpointColumnsObj}
+                className="flex w-auto -ml-6"
+                columnClassName="pl-6 bg-clip-padding"
+              >
+                {displayedItems.map(item => (
                   <ItemCard
                     key={item.id}
                     {...withSelectedVariant(item)}
@@ -1081,10 +1237,10 @@ export function Dashboard() {
                     onClick={() => handleItemClick(item)}
                     onSelectVariant={handleSelectVariant}
                   />
-                ))
-              )}
-            </Masonry>
-          </SortableContext>
+                ))}
+              </Masonry>
+            </SortableContext>
+          )}
              </>
           )}
         </div>
@@ -1112,7 +1268,6 @@ export function Dashboard() {
         onEditPriceHistory={() => setIsEditPriceModalOpen(true)}
         onSelectVariant={handleSelectVariant}
         isRefreshing={isRefreshing}
-        notification={notification}
       />
 
       <EditPriceHistoryModal
@@ -1154,7 +1309,84 @@ export function Dashboard() {
       {isSettingsModalOpen && (
         <SettingsModal onClose={() => setIsSettingsModalOpen(false)} />
       )}
+
+      <Toast toast={notification} onDismiss={() => setNotification(null)} />
     </div>
     </DndContext>
+  );
+}
+
+/**
+ * Grille de squelettes affichée le temps du premier instantané Firestore.
+ * Elle reprend la trame de la grille réelle pour éviter le saut de mise en page.
+ */
+function ItemsSkeleton({ breakpointCols }: { breakpointCols: Record<string, number> }) {
+  const heights = ['h-64', 'h-80', 'h-72', 'h-96', 'h-72', 'h-64', 'h-80', 'h-72'];
+
+  return (
+    <Masonry
+      breakpointCols={breakpointCols}
+      className="flex w-auto -ml-6"
+      columnClassName="pl-6 bg-clip-padding"
+    >
+      {heights.map((height, index) => (
+        <div
+          key={index}
+          className={cn(
+            'skeleton rounded-3xl mb-6 border border-[#dee2e6]',
+            height
+          )}
+          aria-hidden="true"
+        />
+      ))}
+    </Masonry>
+  );
+}
+
+interface EmptyStateProps {
+  hasQuery: boolean;
+  onClearQuery: () => void;
+  onAdd: () => void;
+}
+
+/** Ce qui s'affiche quand la grille ne contient rien : la raison, puis l'issue. */
+function EmptyState({ hasQuery, onClearQuery, onAdd }: EmptyStateProps) {
+  return (
+    <div className="flex flex-col items-center text-center py-16 sm:py-24 px-6 bg-white border border-dashed border-[#dee2e6] rounded-3xl animate-in fade-in zoom-in-98">
+      <div className="w-16 h-16 rounded-2xl bg-[#eef2f0] flex items-center justify-center mb-5">
+        {hasQuery ? (
+          <Search className="w-7 h-7 text-[#4a7c59]" />
+        ) : (
+          <Inbox className="w-7 h-7 text-[#4a7c59]" />
+        )}
+      </div>
+
+      <h3 className="text-lg font-semibold text-[#212529]">
+        {hasQuery ? 'Aucun article ne correspond' : 'Ce tableau est encore vide'}
+      </h3>
+      <p className="text-sm text-[#6c757d] mt-2 max-w-sm">
+        {hasQuery
+          ? 'Essayez un autre mot-clé, ou vérifiez que le tableau sélectionné est bien le bon.'
+          : "Ajoutez un premier article pour suivre son prix jour après jour et être prévenu dès qu'il baisse."}
+      </p>
+
+      {hasQuery ? (
+        <button
+          onClick={onClearQuery}
+          className="mt-6 inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-[#dee2e6] text-[#212529] text-sm font-medium rounded-xl hover:bg-[#f8f9fa] transition-colors"
+        >
+          <X className="w-4 h-4" />
+          Effacer la recherche
+        </button>
+      ) : (
+        <button
+          onClick={onAdd}
+          className="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-[#212529] text-white text-sm font-medium rounded-xl hover:bg-black transition-colors"
+        >
+          <PackagePlus className="w-4 h-4" />
+          Ajouter un article
+        </button>
+      )}
+    </div>
   );
 }

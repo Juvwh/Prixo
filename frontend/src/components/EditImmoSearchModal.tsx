@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Search } from 'lucide-react';
+import { useModalBehavior, backdropClose } from '../hooks/useModalBehavior';
 
 interface EditImmoSearchModalProps {
   isOpen: boolean;
@@ -21,6 +22,8 @@ export function EditImmoSearchModal({ isOpen, onClose, onSubmit, search }: EditI
     }
   }, [search]);
 
+  useModalBehavior(isOpen, onClose);
+
   if (!isOpen || !search) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -30,7 +33,9 @@ export function EditImmoSearchModal({ isOpen, onClose, onSubmit, search }: EditI
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-[60]">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-[60]"
+      onClick={backdropClose(onClose)}
+    >
       <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="flex justify-between items-center p-6 border-b border-gray-100">
           <h2 className="text-xl font-bold text-[#212529] flex items-center">

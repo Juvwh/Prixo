@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Home, PlusSquare, LogOut, Heart, Menu, Lock, Settings, Search } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Home, PlusSquare, LogOut, Heart, Menu, Lock, Settings, Search, X } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useDroppable } from '@dnd-kit/core';
 
@@ -26,12 +26,29 @@ interface SidebarProps {
 export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogout, className, boards, selectedBoardId, onSelectBoard, userEmail }: SidebarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Le tiroir mobile ne se fermait qu'au clic sur le voile, et le fond
+  // continuait de défiler derrière lui.
+  useEffect(() => {
+    if (!isMobileMenuOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsMobileMenuOpen(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isMobileMenuOpen]);
+
   return (
     <>
       {/* Mobile Top Bar */}
       <div className="md:hidden fixed top-0 left-0 w-full bg-white border-b border-[#dee2e6] px-4 py-3 flex justify-between items-center z-40">
         <h1 className="text-xl font-bold text-[#212529] tracking-tight">Prixo</h1>
-        <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-[#212529]">
+        <button
+          onClick={() => setIsMobileMenuOpen(true)}
+          className="p-2 -mr-2 text-[#212529] rounded-lg hover:bg-[#eef2f0] transition-colors"
+          aria-label="Ouvrir le menu"
+          aria-expanded={isMobileMenuOpen}
+        >
           <Menu className="w-6 h-6" />
         </button>
       </div>
@@ -39,8 +56,9 @@ export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogou
       {/* Mobile Overlay */}
       {isMobileMenuOpen && (
         <div
-          className="md:hidden fixed inset-0 bg-black/20 z-40"
+          className="md:hidden fixed inset-0 bg-black/30 backdrop-blur-[2px] z-40 animate-in fade-in"
           onClick={() => setIsMobileMenuOpen(false)}
+          aria-hidden="true"
         />
       )}
 
@@ -50,8 +68,15 @@ export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogou
         !isMobileMenuOpen && "-translate-x-full md:translate-x-0",
         className
       )}>
-        <div className="p-6">
+        <div className="p-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-[#212529] tracking-tight">Prixo</h1>
+          <button
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="md:hidden p-2 -mr-2 text-[#6c757d] hover:text-[#212529] hover:bg-[#eef2f0] rounded-lg transition-colors"
+            aria-label="Fermer le menu"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
@@ -73,7 +98,7 @@ export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogou
                 e.stopPropagation();
                 onEditBoardClick({ id: 'all', name: 'Tous les articles', isPrivate: false, isSpecial: true });
               }}
-              className="ml-2 p-1 text-[#adb5bd] opacity-0 group-hover:opacity-100 hover:text-[#212529] transition-all rounded-md hover:bg-black/5"
+              className="ml-2 p-1.5 text-[#adb5bd] opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 hover:text-[#212529] transition-all rounded-md hover:bg-black/5 shrink-0"
               title="Options"
             >
               <Settings className="w-4 h-4" />
@@ -113,7 +138,7 @@ export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogou
                 e.stopPropagation();
                 onEditBoardClick({ id: 'favorites', name: 'Coups de cœur', isPrivate: false, isSpecial: true });
               }}
-              className="ml-2 p-1 text-[#adb5bd] opacity-0 group-hover:opacity-100 hover:text-[#212529] transition-all rounded-md hover:bg-black/5"
+              className="ml-2 p-1.5 text-[#adb5bd] opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 hover:text-[#212529] transition-all rounded-md hover:bg-black/5 shrink-0"
               title="Options"
             >
               <Settings className="w-4 h-4" />
@@ -124,8 +149,9 @@ export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogou
             <p className="text-xs font-semibold text-[#adb5bd] uppercase tracking-wider">Tableaux Partagés</p>
             <button
               onClick={onAddBoardClick}
-              className="text-[#6c757d] hover:text-[#212529] transition-colors"
+              className="text-[#6c757d] hover:text-[#212529] transition-colors p-1 -m-1 rounded-md"
               title="Créer un tableau"
+              aria-label="Créer un tableau partagé"
             >
               <PlusSquare className="w-4 h-4" />
             </button>
@@ -149,6 +175,14 @@ export function Sidebar({ onAddClick, onAddBoardClick, onEditBoardClick, onLogou
             <p className="text-xs font-semibold text-[#adb5bd] uppercase tracking-wider flex items-center">
               Tableaux Privés <Lock className="w-3 h-3 ml-1" />
             </p>
+            <button
+              onClick={onAddBoardClick}
+              className="text-[#6c757d] hover:text-[#212529] transition-colors p-1 -m-1 rounded-md"
+              title="Créer un tableau"
+              aria-label="Créer un tableau privé"
+            >
+              <PlusSquare className="w-4 h-4" />
+            </button>
           </div>
 
           {boards.filter(b => b.isPrivate).length === 0 ? (
@@ -249,7 +283,7 @@ function DroppableBoard({ board, selectedBoardId, onClick, onEditClick }: { boar
           e.stopPropagation(); // Prevent board selection when clicking settings
           onEditClick();
         }}
-        className="ml-2 p-1 text-[#adb5bd] opacity-0 group-hover:opacity-100 hover:text-[#212529] transition-all rounded-md hover:bg-black/5"
+        className="ml-2 p-1.5 text-[#adb5bd] opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 hover:text-[#212529] transition-all rounded-md hover:bg-black/5 shrink-0"
         title="Modifier le tableau"
       >
         <Settings className="w-4 h-4" />

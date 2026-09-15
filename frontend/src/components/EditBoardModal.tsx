@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Trash2, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { BoardData } from './Sidebar';
+import { useModalBehavior, backdropClose } from '../hooks/useModalBehavior';
 
 interface EditBoardModalProps {
   isOpen: boolean;
@@ -35,6 +36,8 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
       setInitialPrices({});
     }
   }, [board, isOpen]);
+
+  useModalBehavior(isOpen, onClose);
 
   if (!isOpen || !board) return null;
 
@@ -77,7 +80,9 @@ export function EditBoardModal({ isOpen, onClose, onSubmit, onDelete, onRefresh,
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
+      onClick={backdropClose(onClose)}
+    >
       <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#fafafa]">
           <h2 className="text-xl font-bold text-[#212529]">{board.isSpecial ? "Options" : "Modifier le tableau"}</h2>
