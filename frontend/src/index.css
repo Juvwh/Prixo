@@ -1,7 +1,10 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #f8f9fa; /* Warm white/light gray background */
+  --color-primary: #f8f9fa; /* Aplat clair posé à l'intérieur des cartes */
+  /* Fond de page. Il était à #f8f9fa, soit un blanc à peine teinté : les cartes
+     blanches s'y fondaient et la grille n'avait aucun relief. */
+  --color-canvas: #e3e7ec;
   --color-secondary: #e9ecef;
   --color-accent: #a8d5ba; /* Mint green */
   --color-accent-deep: #4a7c59; /* Mint green, version lisible sur blanc */
@@ -18,7 +21,7 @@
 }
 
 body {
-  background-color: var(--color-primary);
+  background-color: var(--color-canvas);
   color: var(--color-text-main);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -140,7 +143,8 @@ body[data-scroll-locked] {
 @utility skeleton {
   position: relative;
   overflow: hidden;
-  background-color: #e9ecef;
+  /* Un cran sous le fond de page, sinon les squelettes disparaissent dedans. */
+  background-color: #dbe0e5;
 }
 
 @utility animate-pulse-ring {

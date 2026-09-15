@@ -34,7 +34,7 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#f8f9fa] p-4">
+    <div className="min-h-screen flex items-center justify-center bg-canvas p-4">
       <div className="w-full max-w-md bg-white rounded-3xl shadow-[0_18px_40px_-12px_rgb(33_37_41/0.14)] overflow-hidden p-8 border border-[#dee2e6] animate-in fade-in slide-in-from-bottom-4">
         <div className="text-center mb-8">
           <span className="inline-flex w-12 h-12 rounded-2xl bg-[#eef2f0] items-center justify-center mb-4">

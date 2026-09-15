@@ -66,8 +66,11 @@ export function DualPrice({ priceBe, priceFr, errorBe, errorFr, size = 'card' }:
         isCheapest={frIsCheapest}
         size={size}
       />
-      {comparable && (
-        <p className="col-span-2 text-[11px] text-[#6c757d]">
+      {/* L'écart chiffré n'est donné que sur la fiche article : sur une carte,
+          il répète ce que dit déjà le badge « meilleur prix » et alourdit un
+          bloc qui en compte déjà beaucoup. */}
+      {comparable && size === 'detail' && (
+        <p className="col-span-2 text-xs text-[#6c757d]">
           {frIsCheapest ? 'La France' : 'La Belgique'} est moins chère de{' '}
           <span className="font-semibold text-[#212529]">{formatPrice(gap)}</span>
         </p>

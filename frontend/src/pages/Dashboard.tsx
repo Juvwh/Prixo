@@ -916,7 +916,7 @@ export function Dashboard() {
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
     >
-    <div className="min-h-screen bg-[#f8f9fa] flex">
+    <div className="min-h-screen bg-canvas flex">
       <Sidebar
         onAddClick={() => setIsAddModalOpen(true)}
         onAddBoardClick={() => setIsAddBoardModalOpen(true)}
@@ -1058,7 +1058,7 @@ export function Dashboard() {
                   >
                     <Bell size={20} />
                     {unreadCount > 0 && (
-                      <span className="absolute -top-1.5 -right-1.5 min-w-[1.25rem] h-5 px-1 bg-[#4a7c59] text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-[#f8f9fa]">
+                      <span className="absolute -top-1.5 -right-1.5 min-w-[1.25rem] h-5 px-1 bg-[#4a7c59] text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-canvas">
                         {unreadCount}
                       </span>
                     )}

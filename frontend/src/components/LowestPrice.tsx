@@ -45,23 +45,28 @@ export function LowestPrice({
 
   if (size === 'card') {
     if (!lowestBe) return null;
+
+    // Sur une carte, la même information était donnée deux fois : le prix
+    // plancher avec sa date, puis un badge « au plus bas » en bout de ligne.
+    // Une seule phrase suffit, et elle change selon le cas de figure.
+    const shortDate = formatHistoryDate(lowestBe.date, { day: 'numeric', month: 'short' });
+
     return (
       <p
         className={cn(
-          'flex items-center gap-1.5 text-[11px] text-[#6c757d] tabular-nums',
+          'flex items-center gap-1.5 text-xs tabular-nums',
+          isAtLowest ? 'text-[#4a7c59] font-medium' : 'text-[#6c757d]',
           className
         )}
         title={`Prix le plus bas relevé le ${formatHistoryDate(lowestBe.date)}`}
       >
         <TrendingDown className="w-3.5 h-3.5 shrink-0 text-[#4a7c59]" />
-        <span>
-          Plus bas&nbsp;: <span className="font-semibold text-[#212529]">{formatPrice(lowestBe.price)}</span>
-          {' · '}
-          {formatHistoryDate(lowestBe.date, { day: 'numeric', month: 'short', year: 'numeric' })}
-        </span>
-        {isAtLowest && (
-          <span className="ml-auto shrink-0 text-[9px] font-bold uppercase tracking-wide text-[#4a7c59]">
-            Au plus bas
+        {isAtLowest ? (
+          <span>Au plus bas depuis le {shortDate}</span>
+        ) : (
+          <span>
+            Plus bas&nbsp;: <span className="font-semibold text-[#212529]">{formatPrice(lowestBe.price)}</span>
+            {' · '}{shortDate}
           </span>
         )}
       </p>

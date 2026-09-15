@@ -11,7 +11,7 @@ function App() {
     // Un « Chargement... » nu sur fond gris donnait l'impression d'une page
     // cassée. L'écran d'attente porte désormais l'identité de l'application.
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#f8f9fa] gap-4">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-canvas gap-4">
         <span className="inline-flex w-14 h-14 rounded-2xl bg-[#eef2f0] items-center justify-center animate-pulse-ring">
           <TrendingDown className="w-7 h-7 text-[#4a7c59]" />
         </span>

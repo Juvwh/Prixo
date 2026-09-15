@@ -67,13 +67,10 @@ export function ItemCard(props: ItemCardProps) {
   const shownPrice = active ? active.currentPrice : currentPrice;
   const shownError = active?.lastScrapeError || lastScrapeError;
 
-  // Variation lors du dernier relevé, en valeur et en pourcentage : un écart de
-  // 4 € ne se lit pas de la même façon sur un article à 40 € et sur un canapé
-  // à 900 €.
+  // Variation lors du dernier relevé.
   const previous = shownHistory.length > 1 ? shownHistory[shownHistory.length - 2].price : null;
   const latest = shownHistory.length > 0 ? shownHistory[shownHistory.length - 1].price : null;
   const diff = previous !== null && latest !== null ? latest - previous : 0;
-  const percent = previous ? (diff / previous) * 100 : 0;
 
   const priceDropped = diff < 0;
   const priceIncreased = diff > 0;
@@ -127,20 +124,6 @@ export function ItemCard(props: ItemCardProps) {
             </div>
           )}
         </div>
-
-        {/* Pastille de variation : le repère qu'on cherche en balayant la grille. */}
-        {!isSelected && !isScraping && !shownError && (priceDropped || priceIncreased) && (
-          <div
-            className={cn(
-              'absolute top-4 right-4 flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-bold shadow-sm backdrop-blur tabular-nums',
-              priceDropped ? 'bg-[#4a7c59] text-white' : 'bg-white/90 text-red-600'
-            )}
-            title={`${priceDropped ? 'Baisse' : 'Hausse'} de ${formatPrice(Math.abs(diff))} au dernier relevé`}
-          >
-            {priceDropped ? <ArrowDownRight className="w-3.5 h-3.5" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
-            {percent ? `${Math.abs(percent).toFixed(0)} %` : formatPrice(Math.abs(diff))}
-          </div>
-        )}
 
         {isSelected && (
           <div className="absolute top-4 right-4 bg-white rounded-full shadow-sm">
@@ -196,11 +179,13 @@ export function ItemCard(props: ItemCardProps) {
               errorFr={active?.lastScrapeErrorFr}
             />
 
-            <LowestPrice
-              history={shownHistory}
-              currentPrice={shownPrice}
-              className="mt-2.5"
-            />
+            {!shownError && (
+              <LowestPrice
+                history={shownHistory}
+                currentPrice={shownPrice}
+                className="mt-2.5"
+              />
+            )}
 
             <div className="flex items-end justify-between gap-3 mt-3">
               <div className="min-w-0">
