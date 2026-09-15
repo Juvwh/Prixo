@@ -6,6 +6,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { DualPrice } from './DualPrice';
 import { ColorSwatches } from './ColorSwatches';
+import { LowestPrice } from './LowestPrice';
 import { getVariants, getActiveVariant } from '../utils/variants';
 
 interface ItemCardProps {
@@ -153,6 +154,12 @@ export function ItemCard(props: ItemCardProps) {
               priceFr={active?.currentPriceFr ?? null}
               errorBe={shownError}
               errorFr={active?.lastScrapeErrorFr}
+            />
+
+            <LowestPrice
+              history={shownHistory}
+              currentPrice={shownPrice}
+              className="mt-2.5"
             />
 
             <div className="flex items-end justify-between mt-3">

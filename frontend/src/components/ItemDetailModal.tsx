@@ -1,10 +1,11 @@
 import React from 'react';
 import { X, RefreshCw, ExternalLink, Edit2, Trash2, AlertTriangle, CheckCircle2, Settings } from 'lucide-react';
-import { LineChart, Line, ResponsiveContainer, YAxis, XAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
+import { LineChart, Line, ResponsiveContainer, YAxis, XAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import { cn } from '../utils/cn';
 import { DualPrice } from './DualPrice';
 import { ColorSwatches } from './ColorSwatches';
-import { getVariants, getActiveVariant, PricePoint } from '../utils/variants';
+import { LowestPrice } from './LowestPrice';
+import { getVariants, getActiveVariant, getLowestPoint, formatPrice, PricePoint } from '../utils/variants';
 
 interface ItemDetailModalProps {
   isOpen: boolean;
@@ -54,6 +55,8 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
 
   const chartData = mergeHistories(historyBe, historyFr);
   const hasFrSeries = historyFr.length > 0;
+  const shownPrice = active ? active.currentPrice : item.currentPrice;
+  const lowestBe = getLowestPoint(historyBe);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/40 backdrop-blur-sm">
@@ -194,6 +197,14 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                    </div>
                 )}
 
+                <LowestPrice
+                  history={historyBe}
+                  historyFr={historyFr}
+                  currentPrice={shownPrice}
+                  size="detail"
+                  className="mt-4"
+                />
+
                 <p className="text-sm text-[#6c757d] mt-3">Dernière vérification : {new Date(item.lastChecked).toLocaleDateString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
               </div>
 
@@ -235,6 +246,19 @@ export function ItemDetailModal({ isOpen, onClose, item, onRefresh, onDelete, on
                           height={28}
                           iconType="plainline"
                           wrapperStyle={{ fontSize: 12, color: '#6c757d' }}
+                        />
+                      )}
+                      {lowestBe && (
+                        <ReferenceLine
+                          y={lowestBe.price}
+                          stroke="#4a7c59"
+                          strokeDasharray="4 4"
+                          label={{
+                            value: `Plus bas ${formatPrice(lowestBe.price)}`,
+                            position: 'insideTopLeft',
+                            fill: '#4a7c59',
+                            fontSize: 11,
+                          }}
                         />
                       )}
                       <Line

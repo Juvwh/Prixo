@@ -7,46 +7,68 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.groupId;
     }
 
+    function inMyGroup(data) {
+      return request.auth != null && data.groupId == getUserGroup();
+    }
+
     match /items/{itemId} {
-      allow read: if request.auth != null &&
-                  resource.data.groupId == getUserGroup() &&
-                  (!resource.data.isPrivate || resource.data.userId == request.auth.uid);
+      // Un article non privé appartient au foyer : les deux comptes le voient et
+      // le modifient (couleurs, liens, tableaux, ordre). Seul un article privé
+      // reste réservé à son créateur.
+      // `get(..., défaut)` protège les articles créés avant l'ajout de ces
+      // champs : sans lui, un article sans `userId` devenait immodifiable pour
+      // tout le monde, ce qui se manifestait par une erreur « impossible de
+      // mettre à jour » au moment d'enregistrer.
+      function visible(data) {
+        return inMyGroup(data) &&
+               (!data.get('isPrivate', false) || data.get('userId', '') == request.auth.uid);
+      }
+
+      allow read: if visible(resource.data);
+
       allow create: if request.auth != null &&
                     request.resource.data.userId == request.auth.uid &&
                     request.resource.data.groupId == getUserGroup();
-      allow update, delete: if request.auth != null &&
-                            resource.data.groupId == getUserGroup() &&
-                            resource.data.userId == request.auth.uid;
+
+      // La propriété et le groupe ne peuvent pas être réécrits au passage.
+      allow update: if visible(resource.data) &&
+                    request.resource.data.groupId == resource.data.groupId &&
+                    request.resource.data.get('userId', '') == resource.data.get('userId', '');
+
+      allow delete: if visible(resource.data);
     }
 
     match /boards/{boardId} {
-      allow read: if request.auth != null &&
-                  resource.data.groupId == getUserGroup() &&
-                  (!resource.data.isPrivate || resource.data.ownerId == request.auth.uid);
+      function visible(data) {
+        return inMyGroup(data) &&
+               (!data.get('isPrivate', false) || data.get('ownerId', '') == request.auth.uid);
+      }
+
+      allow read: if visible(resource.data);
+
       allow create: if request.auth != null &&
                     request.resource.data.ownerId == request.auth.uid &&
                     request.resource.data.groupId == getUserGroup();
-      allow update, delete: if request.auth != null &&
-                            resource.data.groupId == getUserGroup() &&
-                            resource.data.ownerId == request.auth.uid;
+
+      allow update: if visible(resource.data) &&
+                    request.resource.data.groupId == resource.data.groupId &&
+                    request.resource.data.get('ownerId', '') == resource.data.get('ownerId', '');
+
+      allow delete: if visible(resource.data);
     }
 
     match /users/{userId} {
-      // Users can only read their own profile, or maybe they can read others in their group?
-      // Since there's no need to read others' profiles in the app yet, let's keep it open to auth for now,
-      // or restrict to same group. The task doesn't explicitly restrict reading users collection,
-      // but let's restrict to authenticated users as before.
+      // Les profils ne contiennent qu'un e-mail et un groupe ; la lecture reste
+      // ouverte aux comptes authentifiés, l'écriture au seul propriétaire.
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == userId;
     }
 
     match /immo_searches/{searchId} {
-      allow read: if request.auth != null &&
-                  resource.data.groupId == getUserGroup();
+      allow read: if inMyGroup(resource.data);
       allow create: if request.auth != null &&
                     request.resource.data.groupId == getUserGroup();
-      allow update, delete: if request.auth != null &&
-                            resource.data.groupId == getUserGroup();
+      allow update, delete: if inMyGroup(resource.data);
     }
   }
 }

@@ -22,7 +22,13 @@ export function EditItemModal({ isOpen, onClose, onSubmit, item, boards }: EditI
   });
   const [variants, setVariants] = useState<VariantDraft[]>([emptyVariantDraft()]);
 
+  // On ne réinitialise le formulaire qu'à l'ouverture, ou en changeant
+  // d'article. L'objet `item` est reconstruit à chaque rendu du tableau de
+  // bord : se caler sur son identité remettait la saisie en cours à zéro dès
+  // qu'un relevé de prix arrivait en arrière-plan, et la couleur ou le lien
+  // tout juste saisis repartaient avec.
   useEffect(() => {
+    if (!isOpen) return;
     if (item) {
       setFormData({
         name: item.name || '',
@@ -48,7 +54,8 @@ export function EditItemModal({ isOpen, onClose, onSubmit, item, boards }: EditI
         imageUrl: v.imageUrl,
       })));
     }
-  }, [item]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, item?.id]);
 
   if (!isOpen || !item) return null;
 

@@ -219,3 +219,42 @@ export function stripUndefined<T extends Record<string, any>>(obj: T): T {
   }
   return out as T;
 }
+
+/**
+ * Le point le plus bas jamais relevé dans un historique.
+ * Les relevés à zéro (article jamais scrapé, page en erreur) sont ignorés :
+ * ce ne sont pas des prix. En cas d'égalité, on retient la date la plus
+ * récente — c'est la question qu'on se pose devant la fiche : « à quand
+ * remonte la dernière fois qu'il était à ce prix ? ».
+ */
+export function getLowestPoint(history: PricePoint[] | null | undefined): PricePoint | null {
+  if (!Array.isArray(history) || history.length === 0) return null;
+
+  let best: PricePoint | null = null;
+  for (const point of history) {
+    const price = Number(point?.price);
+    if (!Number.isFinite(price) || price <= 0 || !point?.date) continue;
+    if (!best || price < best.price || (price === best.price && point.date >= best.date)) {
+      best = { date: point.date, price };
+    }
+  }
+  return best;
+}
+
+/**
+ * Formate une date d'historique. Les relevés automatiques sont stockés en
+ * `AAAA-MM-JJ`, les corrections manuelles en ISO complet : les deux doivent
+ * s'afficher sans décalage de fuseau.
+ */
+export function formatHistoryDate(
+  date: string,
+  options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: 'numeric' }
+): string {
+  if (!date) return '';
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
+  const parsed = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    : new Date(date);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleDateString('fr-FR', options);
+}

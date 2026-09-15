@@ -347,6 +347,15 @@ export function Dashboard() {
     }
   };
 
+  /**
+   * Un article non privé est partagé par le foyer : les deux comptes peuvent
+   * l'écrire. Un article privé reste réservé à son créateur. Ce test doit
+   * rester le miroir exact de firestore.rules, sous peine de laisser partir des
+   * écritures que le serveur refusera.
+   */
+  const canWriteItem = (item: any) =>
+    !!item && (!item.isPrivate || item.userId === user?.uid);
+
   const handleEditItem = async (id: string, data: any) => {
     try {
       const found = items.find(i => i.id === id);
@@ -381,9 +390,21 @@ export function Dashboard() {
 
       // Update selectedItem state to reflect changes in ItemDetailModal if it's open
       setSelectedItem((prev: any) => prev && prev.id === id ? { ...prev, ...payload } : prev);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating document: ", error);
-      showNotification("Erreur lors de la mise à jour de l'article.", 'error');
+      // Un message générique rendait ces échecs indébogables : on distingue le
+      // refus de Firestore du reste, et on montre le code d'erreur sinon.
+      if (error?.code === 'permission-denied') {
+        showNotification(
+          "Modification refusée : cet article est privé et appartient à l'autre compte.",
+          'error'
+        );
+      } else {
+        showNotification(
+          `Erreur lors de la mise à jour de l'article${error?.code ? ` (${error.code})` : ''}.`,
+          'error'
+        );
+      }
     }
   };
 
@@ -406,9 +427,10 @@ export function Dashboard() {
       return next;
     });
 
-    // Pour ses propres articles, on aligne aussi les champs de premier niveau :
-    // ce sont eux qui alimentent le tri par prix, le budget et le mail du matin.
-    if (item.userId !== user?.uid) return;
+    // Quand l'article est modifiable, on aligne aussi les champs de premier
+    // niveau : ce sont eux qui alimentent le tri par prix, le budget et le mail
+    // du matin.
+    if (!canWriteItem(item)) return;
 
     try {
       await updateDoc(doc(db, 'items', itemId), {
@@ -434,9 +456,9 @@ export function Dashboard() {
     const selected = items.filter(i => selectedItemIds.includes(i.id));
     if (selected.length < 2) return;
 
-    const notOwned = selected.filter(i => i.userId !== user?.uid);
-    if (notOwned.length > 0) {
-      showNotification("Vous ne pouvez fusionner que vos propres articles.", 'error');
+    const notWritable = selected.filter(i => !canWriteItem(i));
+    if (notWritable.length > 0) {
+      showNotification("Un article privé de l'autre compte ne peut pas être regroupé.", 'error');
       return;
     }
 
