@@ -37,6 +37,18 @@ jobs:
         working-directory: ./functions
         run: npm ci
 
+      # Expéditeur des mails (variable de dépôt GitHub, pas un secret).
+      # Sans elle, les fonctions retombent sur onboarding@resend.dev, qui
+      # n'envoie qu'au propriétaire du compte Resend.
+      - name: Write functions env
+        working-directory: ./functions
+        env:
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+        run: |
+          if [ -n "$EMAIL_FROM" ]; then
+            printf 'EMAIL_FROM="%s"\n' "$EMAIL_FROM" > .env
+          fi
+
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
 

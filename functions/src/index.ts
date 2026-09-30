@@ -1019,6 +1019,22 @@ export const refreshItemPrice = functions
     };
 });
 
+// Expéditeur des mails. `onboarding@resend.dev` est l'adresse de test de
+// Resend : elle ne délivre QU'À l'adresse du propriétaire du compte Resend,
+// d'où le second compte qui ne recevait jamais rien. Définir EMAIL_FROM
+// (variable GitHub, voir deploy-functions.yml) avec une adresse d'un domaine
+// vérifié dans Resend, ex. « Prixo <alertes@mondomaine.be> ».
+const EMAIL_FROM = process.env.EMAIL_FROM || 'Prixo <onboarding@resend.dev>';
+
+// Le SDK Resend ne lève pas d'exception en cas de refus : il renvoie `{ error }`.
+// Sans cette vérification, un envoi refusé passait pour un succès.
+async function sendEmail(resend: Resend, to: string, subject: string, html: string): Promise<void> {
+  const { error } = await resend.emails.send({ from: EMAIL_FROM, to: [to], subject, html });
+  if (error) {
+    throw new Error(`Resend a refusé l'envoi à ${to} : ${error.message}`);
+  }
+}
+
 // Scheduled function to scrape all items and send summary email
 // Helper to extract links for ImmoSearch
 async function scrapeLinksAttempt(
@@ -1175,6 +1191,89 @@ async function scrapeLinks(
   }
 }
 
+// Paramètres de suivi qui changent d'un chargement à l'autre sans changer le
+// bien (immoweb ajoute par exemple un `searchId` différent à chaque recherche).
+// Liste volontairement courte : certains sites d'agence identifient le bien par
+// un paramètre (`?ref=`, `?id=`), qu'il ne faut surtout pas retirer.
+const IMMO_TRACKING_PARAMS = /^(utm_.*|fbclid|gclid|msclkid|searchid|search_id|sessionid|position|pos|rank|timestamp)$/i;
+const IMMO_SEEN_URLS_MAX = 2000;
+
+// Clé stable d'une annonce : sert uniquement à comparer, l'URL affichée reste celle scrapée.
+function immoLinkKey(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    u.hash = '';
+    const kept = Array.from(u.searchParams.entries())
+      .filter(([name]) => !IMMO_TRACKING_PARAMS.test(name))
+      .sort(([a], [b]) => a.localeCompare(b));
+    const query = kept.length ? '?' + new URLSearchParams(kept).toString() : '';
+    const path = u.pathname.replace(/\/+$/, '') || '/';
+    return `${u.hostname.toLowerCase().replace(/^www\./, '')}${path}${query}`;
+  } catch (e) {
+    return rawUrl.trim();
+  }
+}
+
+// Fusionne le résultat d'un scraping avec les liens déjà connus d'une recherche.
+//
+// `links` ne contient que les annonces visibles au dernier passage : une annonce
+// qui disparaissait une heure (pub tournante, tri, chargement paresseux) puis
+// revenait était annoncée à nouveau par mail à chaque passage. `seenUrls` garde
+// la mémoire de toutes les annonces déjà signalées, indépendamment de `links`
+// (que le frontend réécrit aussi quand on marque un bien comme lu).
+function mergeImmoLinks(searchData: any, scrapedLinks: string[]) {
+  const now = new Date().toISOString();
+  const oldLinksMap = new Map<string, any>();
+  for (const item of searchData.links || []) {
+    if (typeof item === 'string') {
+      // Migrate old string arrays on the fly
+      oldLinksMap.set(immoLinkKey(item), { url: item, isRead: false, isFavorite: false, isIgnored: false, addedAt: now });
+    } else if (item && typeof item === 'object' && item.url) {
+      oldLinksMap.set(immoLinkKey(item.url), item);
+    }
+  }
+
+  const seenKeys: string[] = Array.isArray(searchData.seenUrls) ? searchData.seenUrls.slice() : [];
+  const seenSet = new Set(seenKeys);
+  for (const key of oldLinksMap.keys()) {
+    if (!seenSet.has(key)) {
+      seenSet.add(key);
+      seenKeys.push(key);
+    }
+  }
+
+  const updatedLinks: any[] = [];
+  const newLinks: string[] = [];
+  const scrapedKeys = new Set<string>();
+
+  for (const urlStr of scrapedLinks) {
+    const key = immoLinkKey(urlStr);
+    if (scrapedKeys.has(key)) continue;
+    scrapedKeys.add(key);
+
+    if (oldLinksMap.has(key)) {
+      updatedLinks.push(oldLinksMap.get(key));
+    } else if (seenSet.has(key)) {
+      // Annonce déjà signalée qui réapparaît : on la réaffiche sans la renotifier.
+      updatedLinks.push({ url: urlStr, isRead: true, isFavorite: false, isIgnored: false, addedAt: now });
+    } else {
+      updatedLinks.push({ url: urlStr, isRead: false, isFavorite: false, isIgnored: false, addedAt: now });
+      newLinks.push(urlStr);
+      seenSet.add(key);
+      seenKeys.push(key);
+    }
+  }
+
+  // Also preserve old links that weren't found in the current scrape if they are favorites or ignored, so users don't lose them
+  for (const [key, itemData] of oldLinksMap.entries()) {
+    if ((itemData.isFavorite || itemData.isIgnored) && !scrapedKeys.has(key)) {
+      updatedLinks.push(itemData);
+    }
+  }
+
+  return { updatedLinks, newLinks, seenUrls: seenKeys.slice(-IMMO_SEEN_URLS_MAX) };
+}
+
 export const refreshImmoSearchesV2 = functions
   .region('europe-west1')
   .runWith({ memory: '2GB', timeoutSeconds: 540 })
@@ -1212,8 +1311,6 @@ export const refreshImmoSearchesV2 = functions
 
           const { links, error } = await scrapeLinks(searchData.url, searchData.filterWord || '', session);
 
-          const oldLinks = searchData.links || [];
-
           const updateData: any = {
              isScraping: false,
              lastChecked: new Date().toISOString()
@@ -1224,42 +1321,10 @@ export const refreshImmoSearchesV2 = functions
           } else {
              updateData.lastError = null;
 
-             // Convert old links to map for quick lookup
-             const oldLinksMap = new Map();
-             for (const item of oldLinks) {
-                if (typeof item === 'string') {
-                   // Migrate old string arrays on the fly
-                   oldLinksMap.set(item, { url: item, isRead: false, isFavorite: false, isIgnored: false, addedAt: new Date().toISOString() });
-                } else if (item && typeof item === 'object') {
-                   oldLinksMap.set(item.url, item);
-                }
-             }
-
-             const updatedLinks: any[] = [];
-
-             for (const urlStr of links) {
-                if (oldLinksMap.has(urlStr)) {
-                   updatedLinks.push(oldLinksMap.get(urlStr));
-                } else {
-                   updatedLinks.push({
-                     url: urlStr,
-                     isRead: false,
-                     isFavorite: false,
-                     isIgnored: false,
-                     addedAt: new Date().toISOString()
-                   });
-                   newLinksFound++;
-                }
-             }
-
-             // Also preserve old links that weren't found in the current scrape if they are favorites or ignored, so users don't lose them
-             for (const [urlStr, itemData] of oldLinksMap.entries()) {
-                if ((itemData.isFavorite || itemData.isIgnored) && !links.includes(urlStr)) {
-                   updatedLinks.push(itemData);
-                }
-             }
-
+             const { updatedLinks, newLinks, seenUrls } = mergeImmoLinks(searchData, links);
              updateData.links = updatedLinks;
+             updateData.seenUrls = seenUrls;
+             newLinksFound += newLinks.length;
           }
 
           await docSnap.ref.update(updateData);
@@ -1308,54 +1373,25 @@ export const hourlyImmoScrape = functions
           const { links, error } = await scrapeLinks(searchData.url, searchData.filterWord || '', session);
 
           if (!error && links.length > 0) {
-            const oldLinks = searchData.links || [];
-            const oldLinksMap = new Map();
-            for (const item of oldLinks) {
-               if (typeof item === 'string') {
-                  oldLinksMap.set(item, { url: item, isRead: false, isFavorite: false, isIgnored: false, addedAt: new Date().toISOString() });
-               } else if (item && typeof item === 'object') {
-                  oldLinksMap.set(item.url, item);
-               }
-            }
+            const { updatedLinks, newLinks, seenUrls } = mergeImmoLinks(searchData, links);
 
-            const updatedLinks: any[] = [];
-            const newLinksForAlert: string[] = [];
-
-            for (const urlStr of links) {
-               if (oldLinksMap.has(urlStr)) {
-                  updatedLinks.push(oldLinksMap.get(urlStr));
-               } else {
-                  updatedLinks.push({
-                    url: urlStr,
-                    isRead: false,
-                    isFavorite: false,
-                    isIgnored: false,
-                    addedAt: new Date().toISOString()
-                  });
-                  newLinksForAlert.push(urlStr);
-               }
-            }
-
-            for (const [urlStr, itemData] of oldLinksMap.entries()) {
-               if ((itemData.isFavorite || itemData.isIgnored) && !links.includes(urlStr)) {
-                  updatedLinks.push(itemData);
-               }
-            }
-
-            if (newLinksForAlert.length > 0) {
-              alerts.push({
-                searchName: searchData.name,
-                url: searchData.url,
-                newLinks: newLinksForAlert,
-                groupId: searchData.groupId
-              });
-            }
-
+            // Enregistrer avant d'alerter : si l'écriture échoue, mieux vaut
+            // rater un mail que renvoyer les mêmes biens toutes les heures.
             await docSnap.ref.update({
                links: updatedLinks,
+               seenUrls,
                lastChecked: new Date().toISOString(),
                lastError: null
             });
+
+            if (newLinks.length > 0) {
+              alerts.push({
+                searchName: searchData.name,
+                url: searchData.url,
+                newLinks,
+                groupId: searchData.groupId
+              });
+            }
           } else if (error) {
             await docSnap.ref.update({
                lastChecked: new Date().toISOString(),
@@ -1405,12 +1441,7 @@ export const hourlyImmoScrape = functions
           }
           htmlContent += '</ul>';
 
-          await resend.emails.send({
-            from: 'Prixo <onboarding@resend.dev>',
-            to: [userRecord.email],
-            subject: 'Prixo Immo - Nouveaux biens trouvés',
-            html: htmlContent
-          });
+          await sendEmail(resend, userRecord.email, 'Prixo Immo - Nouveaux biens trouvés', htmlContent);
         } catch (e) {
           console.error("Email error:", e);
         }
@@ -1668,14 +1699,14 @@ export const nightlyScrape = functions
             </p>
           </div>`;
 
-          await resend.emails.send({
-            from: 'Prixo <onboarding@resend.dev>', // Use verified domain in prod
-            to: [email],
-            subject: userChanges.length > 0
+          await sendEmail(
+            resend,
+            email,
+            userChanges.length > 0
               ? 'Prixo - Changements de prix détectés'
               : 'Prixo - Rapport de relevé quotidien',
-            html: htmlContent
-          });
+            htmlContent
+          );
         } catch (err) {
           console.error(`Failed to fetch email or send for user ${userId}:`, err);
         }
@@ -1754,16 +1785,12 @@ export const testEmailNotificationV2 = functions
     htmlContent += '</ul><p><em>Ceci est un email de test généré depuis vos paramètres Prixo.</em></p>';
 
     try {
-      await resend.emails.send({
-        from: 'Prixo <onboarding@resend.dev>', // Use verified domain in prod
-        to: [userEmail],
-        subject: 'Prixo - Email de test (Notification de prix)',
-        html: htmlContent
-      });
+      await sendEmail(resend, userEmail, 'Prixo - Email de test (Notification de prix)', htmlContent);
       return { success: true, message: 'Email de test envoyé avec succès.' };
     } catch (error) {
       console.error("Erreur lors de l'envoi de l'email via Resend:", error);
-      throw new functions.https.HttpsError('internal', "Erreur lors de l'envoi de l'email.");
+      const detail = error instanceof Error ? error.message : '';
+      throw new functions.https.HttpsError('internal', `Erreur lors de l'envoi de l'email. ${detail}`.trim());
     }
   });
 
