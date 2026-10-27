@@ -1598,7 +1598,7 @@ export const nightlyScrape = functions
     );
 
     // Process and send email if there are changes
-    if (changes.length > 0 || failures.length > 0) {
+    if (changes.length > 0) {
       const resendApiKey = process.env.RESEND_API_KEY;
       if (!resendApiKey) {
         console.error("RESEND_API_KEY missing");
@@ -1630,9 +1630,9 @@ export const nightlyScrape = functions
             entry.groupId === userGroupId && (!entry.isPrivate || entry.ownerId === userId);
 
           const userChanges = changes.filter(visibleTo);
-          const userFailures = failures.filter(visibleTo);
 
-          if (userChanges.length === 0 && userFailures.length === 0) continue;
+          // Pas de mail les jours sans variation de prix.
+          if (userChanges.length === 0) continue;
 
           // Sort: Price drops first, then price increases
           userChanges.sort((a, b) => a.diff - b.diff);
@@ -1645,53 +1645,36 @@ export const nightlyScrape = functions
               </p>
           `;
 
-          if (userChanges.length > 0) {
-            htmlContent += '<table style="width:100%; border-collapse:collapse;">';
+          htmlContent += '<table style="width:100%; border-collapse:collapse;">';
 
-            for (const change of userChanges) {
-              const accent = change.diff < 0 ? '#2f8f5b' : '#c0392b';
-              const arrow = change.diff < 0 ? '↓' : '↑';
-              const brandTag = change.brand
-                ? `<span style="display:inline-block; background:#eef2f0; color:#212529; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; padding:2px 8px; border-radius:999px; margin-right:8px;">${change.brand}</span>`
-                : '';
-              const colorTag = change.color
-                ? `<span style="color:#6c757d; font-size:13px;"> — ${change.color}</span>`
-                : '';
+          for (const change of userChanges) {
+            const accent = change.diff < 0 ? '#2f8f5b' : '#c0392b';
+            const arrow = change.diff < 0 ? '↓' : '↑';
+            const brandTag = change.brand
+              ? `<span style="display:inline-block; background:#eef2f0; color:#212529; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; padding:2px 8px; border-radius:999px; margin-right:8px;">${change.brand}</span>`
+              : '';
+            const colorTag = change.color
+              ? `<span style="color:#6c757d; font-size:13px;"> — ${change.color}</span>`
+              : '';
 
-              htmlContent += `
-                <tr>
-                  <td style="padding:14px 0; border-bottom:1px solid #dee2e6;">
-                    <div style="margin-bottom:6px;">${brandTag}<strong>${change.name}</strong>${colorTag}</div>
-                    <div style="font-size:14px;">
-                      <span style="color:#6c757d; text-decoration:line-through;">${change.oldPrice}€</span>
-                      <span style="color:${accent}; font-weight:700; margin-left:8px;">${change.newPrice}€ ${arrow}</span>
-                      <span style="color:${accent}; font-size:12px; margin-left:6px;">
-                        (${change.diff > 0 ? '+' : ''}${change.diff.toFixed(2)}€)
-                      </span>
-                    </div>
-                    <a href="${change.url}" style="font-size:13px; color:#6c757d;">Voir sur le site</a>
-                  </td>
-                </tr>
-              `;
-            }
-
-            htmlContent += '</table>';
-          } else {
-            htmlContent += '<p style="font-size:14px;">Aucun changement de prix aujourd\'hui.</p>';
-          }
-
-          // Rendre les échecs visibles : sans cette section, un article dont le
-          // lien est cassé restait silencieusement figé pendant des semaines.
-          if (userFailures.length > 0) {
             htmlContent += `
-              <h3 style="font-weight:600; font-size:15px; margin-top:28px;">Articles non relevés (${userFailures.length})</h3>
-              <ul style="font-size:13px; color:#6c757d; padding-left:18px;">
+              <tr>
+                <td style="padding:14px 0; border-bottom:1px solid #dee2e6;">
+                  <div style="margin-bottom:6px;">${brandTag}<strong>${change.name}</strong>${colorTag}</div>
+                  <div style="font-size:14px;">
+                    <span style="color:#6c757d; text-decoration:line-through;">${change.oldPrice}€</span>
+                    <span style="color:${accent}; font-weight:700; margin-left:8px;">${change.newPrice}€ ${arrow}</span>
+                    <span style="color:${accent}; font-size:12px; margin-left:6px;">
+                      (${change.diff > 0 ? '+' : ''}${change.diff.toFixed(2)}€)
+                    </span>
+                  </div>
+                  <a href="${change.url}" style="font-size:13px; color:#6c757d;">Voir sur le site</a>
+                </td>
+              </tr>
             `;
-            for (const failure of userFailures.slice(0, 20)) {
-              htmlContent += `<li style="margin-bottom:6px;"><a href="${failure.url}" style="color:#212529;">${failure.name}</a> — ${failure.reason}</li>`;
-            }
-            htmlContent += '</ul>';
           }
+
+          htmlContent += '</table>';
 
           htmlContent += `
             <p style="color:#adb5bd; font-size:11px; margin-top:24px;">
@@ -1699,14 +1682,7 @@ export const nightlyScrape = functions
             </p>
           </div>`;
 
-          await sendEmail(
-            resend,
-            email,
-            userChanges.length > 0
-              ? 'Prixo - Changements de prix détectés'
-              : 'Prixo - Rapport de relevé quotidien',
-            htmlContent
-          );
+          await sendEmail(resend, email, 'Prixo - Changements de prix détectés', htmlContent);
         } catch (err) {
           console.error(`Failed to fetch email or send for user ${userId}:`, err);
         }
